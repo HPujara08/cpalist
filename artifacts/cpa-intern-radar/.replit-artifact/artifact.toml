@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "CPA Intern Radar"
+version = "1.0.0"
+id = "artifacts/cpa-intern-radar"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 22134
+
+[services.development]
+run = "pnpm --filter @workspace/cpa-intern-radar run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/cpa-intern-radar", "run", "build" ]
+publicDir = "artifacts/cpa-intern-radar/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "22134"
+BASE_PATH = "/"

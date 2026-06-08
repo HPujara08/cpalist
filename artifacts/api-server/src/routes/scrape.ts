@@ -1,0 +1,153 @@
+import { Router, type IRouter } from "express";
+import { eq, and } from "drizzle-orm";
+import { db, firmsTable, jobsTable } from "@workspace/db";
+import { ScrapeFirmParams } from "@workspace/api-zod";
+import { scrapeByAts, type AtsType } from "../lib/ats-scrapers";
+
+const router: IRouter = Router();
+
+async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promise<{
+  firmId: number;
+  firmName: string;
+  atsType: string;
+  jobsFound: number;
+  jobsNew: number;
+  success: boolean;
+  error: string | null;
+}> {
+  try {
+    const jobs = await scrapeByAts(firm.atsType as AtsType, firm.atsUrl);
+
+    let jobsNew = 0;
+    for (const job of jobs) {
+      const [existing] = await db
+        .select({ id: jobsTable.id })
+        .from(jobsTable)
+        .where(
+          and(
+            eq(jobsTable.firmId, firm.id),
+            eq(jobsTable.contentHash, job.contentHash)
+          )
+        );
+
+      if (!existing) {
+        await db.insert(jobsTable).values({
+          firmId: firm.id,
+          title: job.title,
+          location: job.location,
+          applyUrl: job.applyUrl,
+          term: job.term,
+          atsSource: firm.atsType,
+          isActive: true,
+          contentHash: job.contentHash,
+        });
+        jobsNew++;
+      } else {
+        await db
+          .update(jobsTable)
+          .set({ lastSeen: new Date(), isActive: true })
+          .where(eq(jobsTable.id, existing.id));
+      }
+    }
+
+    await db
+      .update(firmsTable)
+      .set({ lastChecked: new Date() })
+      .where(eq(firmsTable.id, firm.id));
+
+    return {
+      firmId: firm.id,
+      firmName: firm.name,
+      atsType: firm.atsType,
+      jobsFound: jobs.length,
+      jobsNew,
+      success: true,
+      error: null,
+    };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return {
+      firmId: firm.id,
+      firmName: firm.name,
+      atsType: firm.atsType,
+      jobsFound: 0,
+      jobsNew: 0,
+      success: false,
+      error: message,
+    };
+  }
+}
+
+router.post("/scrape/run", async (req, res): Promise<void> => {
+  const startedAt = new Date();
+  req.log.info("Starting full scrape run");
+
+  const firms = await db
+    .select()
+    .from(firmsTable)
+    .where(eq(firmsTable.atsType, "greenhouse"))
+    .limit(50);
+
+  const leverFirms = await db
+    .select()
+    .from(firmsTable)
+    .where(eq(firmsTable.atsType, "lever"))
+    .limit(50);
+
+  const workdayFirms = await db
+    .select()
+    .from(firmsTable)
+    .where(eq(firmsTable.atsType, "workday"))
+    .limit(50);
+
+  const allFirms = [...firms, ...leverFirms, ...workdayFirms];
+
+  let firmsProcessed = 0;
+  let jobsFound = 0;
+  let jobsNew = 0;
+  const errors: string[] = [];
+
+  for (const firm of allFirms) {
+    const result = await scrapeOneFirm(firm);
+    firmsProcessed++;
+    jobsFound += result.jobsFound;
+    jobsNew += result.jobsNew;
+    if (!result.success && result.error) {
+      errors.push(`${firm.name}: ${result.error}`);
+    }
+  }
+
+  req.log.info({ firmsProcessed, jobsFound, jobsNew }, "Scrape run complete");
+
+  res.json({
+    startedAt: startedAt.toISOString(),
+    firmsProcessed,
+    jobsFound,
+    jobsNew,
+    errors,
+  });
+});
+
+router.post("/scrape/firms/:id", async (req, res): Promise<void> => {
+  const params = ScrapeFirmParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [firm] = await db
+    .select()
+    .from(firmsTable)
+    .where(eq(firmsTable.id, params.data.id));
+
+  if (!firm) {
+    res.status(404).json({ error: "Firm not found" });
+    return;
+  }
+
+  req.log.info({ firmId: firm.id, atsType: firm.atsType }, "Scraping firm");
+  const result = await scrapeOneFirm(firm);
+  res.json(result);
+});
+
+export default router;

@@ -1,0 +1,398 @@
+I wanna create a project that scrapes data from the top 500 CPA firms in the US daily to look for internship opportunities then tidy it into a daily newsletter like SWE list
+This is actually a strong accounting + CS project because it’s niche, useful, and easy to explain in interviews. I’d frame it less as “scraping everything” and more as an internship intelligence pipeline for accounting students.
+Thought for 10s
+Yes — build it. This is a very good project for you.
+Call it something like:
+
+CPA Intern Radar
+Daily newsletter that tracks internship openings from top accounting firms and sends students a clean digest.
+
+Core idea:
+
+Make a database of the Top 500 CPA firms
+Store each firm’s:
+name
+website
+careers page
+job board URL
+location/HQ
+firm size/rank
+Scrape/check daily for:
+“intern”
+“tax intern”
+“audit intern”
+“accounting intern”
+“summer 2027”
+“winter 2027”
+Normalize results into:
+firm
+role title
+location
+remote/hybrid/onsite
+deadline, if available
+apply link
+date first seen
+Send a daily email like:
+CPA Internship Digest — June 7
+
+New Internships Today
+
+1. RSM — Tax Intern, Summer 2027
+Location: New York, NY
+Apply: link
+
+2. Baker Tilly — Audit Intern, Winter 2027
+Location: Chicago, IL
+Apply: link
+
+Still Open
+
+3. CohnReznick — Audit Intern
+First seen: June 3
+Apply: link
+Best MVP stack:
+Frontend: Next.js
+Backend/API: FastAPI or Node.js
+Database: PostgreSQL
+Scraping: Python + Playwright + BeautifulSoup
+Scheduling: GitHub Actions or cron
+Email: Resend, SendGrid, or Beehiiv-style newsletter
+Hosting: Railway, Render, or Vercel + Supabase
+Important architecture:
+Daily Scheduler
+   ↓
+Firm URL List
+   ↓
+Scraper / Job Board Parser
+   ↓
+Normalize Job Postings
+   ↓
+Deduplicate
+   ↓
+Store in PostgreSQL
+   ↓
+Generate Digest
+   ↓
+Send Newsletter
+Big thing: many firms use job platforms like Workday, Greenhouse, Lever, iCIMS, ADP, UKG, SmartRecruiters, etc. Instead of scraping every website manually, detect the job board provider and make reusable parsers.
+Example database tables:
+
+firms
+- id
+- name
+- rank
+- website_url
+- careers_url
+- job_board_type
+
+jobs
+- id
+- firm_id
+- title
+- location
+- apply_url
+- term
+- first_seen
+- last_seen
+- is_active
+- raw_text
+MVP features I’d build first:
+Track 25 firms first, not 500
+Scrape once per day
+Detect only internships
+Store new jobs
+Send yourself a clean email digest
+Add a simple website later
+This would look really good on your resume:
+CPA Intern Radar — Internship Intelligence Platform
+Built a daily scraping and newsletter pipeline that monitors accounting firm career pages, detects new audit/tax internship postings, deduplicates listings, stores job metadata in PostgreSQL, and sends a curated daily digest to students.
+
+You could honestly make this useful for Hunter Accounting Society too.
+That's actually one of the easiest parts.
+Most companies don't build their own careers site. Their careers page eventually redirects to a third-party ATS (Applicant Tracking System).
+
+Examples:
+
+ATS	URL Pattern
+Workday	myworkdayjobs.com
+Greenhouse	boards.greenhouse.io
+Lever	jobs.lever.co
+iCIMS	careers.icims.com
+SmartRecruiters	jobs.smartrecruiters.com
+Ashby	jobs.ashbyhq.com
+Jobvite	jobs.jobvite.com
+For example:
+https://www.rsmus.com/careers
+might redirect to:
+https://rsm.wd5.myworkdayjobs.com/Experienced
+Once you discover that URL once, you can store:
+firm_name
+careers_page
+ats_type
+ats_url
+Example:
+RSM
+https://www.rsmus.com/careers
+WORKDAY
+https://rsm.wd5.myworkdayjobs.com
+Then every day you query the ATS directly instead of scraping the marketing website.
+A neat trick:
+Many ATS providers expose APIs.
+
+Workday
+Workday job listings are usually fetched through JSON endpoints.
+Example:
+
+https://company.wd5.myworkdayjobs.com/wday/cxs/company/jobs/jobs
+returns JSON.
+Greenhouse
+Greenhouse literally has a public API:
+https://boards-api.greenhouse.io/v1/boards/company/jobs
+Lever
+https://api.lever.co/v0/postings/company
+returns JSON.
+Ashby
+Many Ashby boards expose structured JSON.
+So the architecture becomes:
+Top 500 CPA Firms
+        ↓
+Discover ATS once
+        ↓
+Store ATS type
+        ↓
+Daily API pulls
+        ↓
+Normalize jobs
+        ↓
+Filter internships
+        ↓
+Newsletter
+This is much more reliable than scraping HTML.
+What I'd do is create a script:
+def detect_ats(careers_url):
+that checks:
+if "myworkdayjobs" in url:
+    return "workday"
+
+if "greenhouse.io" in url:
+    return "greenhouse"
+
+if "lever.co" in url:
+    return "lever"
+Run it on all 500 firms once.
+You'd probably find something like:
+
+150 Workday
+80 Greenhouse
+40 iCIMS
+30 Lever
+20 Ashby
+180 miscellaneous/custom
+Then write one parser per ATS.
+The cool thing is that after building those parsers, your scraper can expand beyond accounting firms. You could track consulting, finance, software engineering, or any industry that uses those same ATS systems. That turns the project from a simple scraper into a reusable job intelligence platform.
+can you provided a breakdown of how I can execute this project
+I’d execute this in phases so you don’t get stuck trying to scrape 500 firms immediately. The first win is tracking 20–30 firms end-to-end, then scaling the same pipeline.
+Thought for 4s
+Here’s the clean execution plan.
+Phase 1: MVP Scope
+Start with 25 CPA firms, not 500.
+Goal:
+
+Every day, find new accounting internships and email yourself a digest.
+Track roles like:
+audit intern
+tax intern
+accounting intern
+assurance intern
+summer intern
+winter intern
+Phase 2: Create Firm Database
+Make a CSV first:
+firm_name,rank,website,careers_url,ats_type,ats_url
+RSM,5,https://rsmus.com,https://rsmus.com/careers,workday,...
+BDO,6,https://bdo.com,https://bdo.com/careers,unknown,...
+Later move it into PostgreSQL.
+Phase 3: ATS Discovery Script
+Write a script that visits each careers_url and detects where it redirects.
+Logic:
+
+if "myworkdayjobs.com" in final_url:
+    ats_type = "workday"
+elif "greenhouse.io" in final_url:
+    ats_type = "greenhouse"
+elif "lever.co" in final_url:
+    ats_type = "lever"
+elif "icims.com" in final_url:
+    ats_type = "icims"
+else:
+    ats_type = "custom"
+Use Playwright because some careers pages load links with JavaScript.
+Phase 4: Job Scrapers
+Create one scraper per ATS.
+Folder structure:
+
+scrapers/
+  workday.py
+  greenhouse.py
+  lever.py
+  icims.py
+  custom.py
+Each scraper should return the same shape:
+{
+  "firm": "RSM",
+  "title": "Tax Intern - Summer 2027",
+  "location": "New York, NY",
+  "apply_url": "...",
+  "posted_date": None,
+  "source": "workday"
+}
+Phase 5: Filter Internship Roles
+Filter titles by keywords:
+INTERN_KEYWORDS = [
+    "intern",
+    "internship",
+    "summer 2027",
+    "winter 2027",
+    "audit intern",
+    "tax intern",
+    "assurance intern"
+]
+Ignore:
+"experienced"
+"senior"
+"manager"
+"director"
+"partner"
+Phase 6: Database
+Use PostgreSQL/Supabase.
+Tables:
+
+firms
+- id
+- name
+- rank
+- website_url
+- careers_url
+- ats_type
+- ats_url
+
+jobs
+- id
+- firm_id
+- title
+- location
+- apply_url
+- source
+- first_seen
+- last_seen
+- is_active
+- content_hash
+Use content_hash to deduplicate jobs.
+Phase 7: Daily Pipeline
+Daily script:
+1. Load firms
+2. Visit ATS/job board
+3. Pull job postings
+4. Filter internships
+5. Deduplicate
+6. Save new jobs
+7. Generate email
+8. Send newsletter
+Phase 8: Newsletter
+Use Resend or SendGrid.
+Email format:
+
+CPA Internship Radar — Daily Digest
+
+New Today
+
+RSM — Tax Intern, Summer 2027
+Location: New York, NY
+Apply: link
+
+BDO — Audit Intern
+Location: Chicago, IL
+Apply: link
+
+Still Open
+
+CohnReznick — Assurance Intern
+First seen: June 3
+Apply: link
+Phase 9: Deployment
+Simplest version:
+GitHub Actions runs scraper daily
+Supabase stores jobs
+Resend sends email
+Vercel hosts landing page
+No need for a full backend at first.
+Suggested Build Order
+Week 1:
+CSV of 25 firms
+ATS detection script
+Greenhouse + Lever scrapers
+Basic database
+Week 2:
+Workday scraper
+Deduplication
+Daily GitHub Action
+Email digest
+Week 3:
+Scale to 100 firms
+Add landing page
+Add subscribe form
+Add search/filter UI
+Week 4:
+Scale to 500 firms
+Add admin dashboard
+Add job expiration tracking
+Add analytics
+Resume bullet:
+Built CPA Internship Radar, a job intelligence pipeline that monitors CPA firm career pages and ATS platforms, detects new audit/tax internship postings, deduplicates listings with PostgreSQL, and sends a daily curated newsletter to accounting students.
+This is very doable and actually useful. Start with 25 firms and one email to yourself.
+can u start off by building the CSV file for the top 25 firms
+Absolutely. For your MVP, I would start with the top firms from the 2025 IPA Top 500 ranking because that's the same source you'll likely use when you scale to 500 firms.
+Here's a starter CSV for the Top 25 firms:
+
+rank,firm_name,hq_city,hq_state,website,careers_url,ats_type,ats_url
+1,Deloitte,New York,NY,https://www.deloitte.com,https://www.deloitte.com/us/en/careers.html,unknown,
+2,PwC,New York,NY,https://www.pwc.com/us,https://www.pwc.com/us/en/careers.html,unknown,
+3,EY,New York,NY,https://www.ey.com/en_us,https://www.ey.com/en_us/careers,unknown,
+4,KPMG,New York,NY,https://kpmg.com/us,https://kpmg.com/us/en/careers.html,unknown,
+5,RSM,Chicago,IL,https://rsmus.com,https://rsmus.com/careers,unknown,
+6,Baker Tilly,Chicago,IL,https://www.bakertilly.com,https://www.bakertilly.com/careers,unknown,
+7,CBIZ,Cleveland,OH,https://www.cbiz.com,https://www.cbiz.com/careers,unknown,
+8,BDO USA,Chicago,IL,https://www.bdo.com,https://www.bdo.com/careers,unknown,
+9,Grant Thornton,Chicago,IL,https://www.grantthornton.com,https://www.grantthornton.com/careers,unknown,
+10,Forvis Mazars,Springfield,MO,https://www.forvismazars.us,https://www.forvismazars.us/careers,unknown,
+11,CLA,Minneapolis,MN,https://www.claconnect.com,https://www.claconnect.com/careers,unknown,
+12,Crowe,Chicago,IL,https://www.crowe.com,https://www.crowe.com/careers,unknown,
+13,Plante Moran,Southfield,MI,https://www.plantemoran.com,https://www.plantemoran.com/careers,unknown,
+14,CohnReznick,New York,NY,https://www.cohnreznick.com,https://www.cohnreznick.com/careers,unknown,
+15,Moss Adams,Seattle,WA,https://www.mossadams.com,https://www.mossadams.com/careers,unknown,
+16,Marcum,New York,NY,https://www.marcumllp.com,https://www.marcumllp.com/careers,unknown,
+17,EisnerAmper,New York,NY,https://www.eisneramper.com,https://www.eisneramper.com/careers,unknown,
+18,Cherry Bekaert,Richmond,VA,https://www.cbh.com,https://www.cbh.com/careers,unknown,
+19,Citrin Cooperman,New York,NY,https://www.citrincooperman.com,https://www.citrincooperman.com/careers,unknown,
+20,PKF O'Connor Davies,Harrison,NY,https://www.pkfod.com,https://www.pkfod.com/careers,unknown,
+21,Eide Bailly,Fargo,ND,https://www.eidebailly.com,https://www.eidebailly.com/careers,unknown,
+22,Armanino,San Ramon,CA,https://www.armanino.com,https://www.armanino.com/careers,unknown,
+23,BPM LLP,San Francisco,CA,https://www.bpm.com,https://www.bpm.com/careers,unknown,
+24,Dixon Hughes Goodman (DHG),Charlotte,NC,https://www.dhg.com,https://www.dhg.com/careers,unknown,
+25,Berkowitz Pollack Brant,Miami,FL,https://www.bpbcpa.com,https://www.bpbcpa.com/careers,unknown,
+A couple of notes:
+Some firms have merged recently (e.g., Forvis + Mazars, DHG history), so you'll want your scraper to handle redirects and acquisitions gracefully.
+The careers_url field doesn't need to be perfect. Your ATS discovery script will visit the page and determine the actual job board URL.
+Add these fields now even if they're empty:
+ats_type
+ats_url
+last_checked
+internships_found
+Your first script should simply:
+For each firm:
+  Visit careers_url
+  Follow redirects
+  Record final URL
+  Detect ATS provider
+  Save ats_type + ats_url
+After that, the whole project becomes dramatically easier because you're scraping maybe 5–10 ATS providers instead of 500 unique websites. That's the key architectural insight that makes this project scalable.

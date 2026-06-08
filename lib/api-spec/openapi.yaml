@@ -3,20 +3,27 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: CPA Intern Radar API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: firms
+    description: CPA firm operations
+  - name: jobs
+    description: Job posting operations
+  - name: scrape
+    description: Scraping operations
+  - name: stats
+    description: Dashboard statistics
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +31,211 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /firms:
+    get:
+      operationId: listFirms
+      tags: [firms]
+      summary: List all CPA firms
+      parameters:
+        - name: ats_type
+          in: query
+          schema:
+            type: string
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of firms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Firm"
+    post:
+      operationId: createFirm
+      tags: [firms]
+      summary: Add a new CPA firm
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FirmInput"
+      responses:
+        "201":
+          description: Created firm
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Firm"
+
+  /firms/{id}:
+    get:
+      operationId: getFirm
+      tags: [firms]
+      summary: Get a firm by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Firm
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Firm"
+        "404":
+          description: Not found
+    patch:
+      operationId: updateFirm
+      tags: [firms]
+      summary: Update a firm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FirmUpdate"
+      responses:
+        "200":
+          description: Updated firm
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Firm"
+        "404":
+          description: Not found
+
+  /firms/{id}/detect-ats:
+    post:
+      operationId: detectFirmAts
+      tags: [firms]
+      summary: Detect ATS provider for a firm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: ATS detection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtsDetectionResult"
+        "404":
+          description: Not found
+
+  /jobs:
+    get:
+      operationId: listJobs
+      tags: [jobs]
+      summary: List internship job postings
+      parameters:
+        - name: firm_id
+          in: query
+          schema:
+            type: integer
+        - name: is_active
+          in: query
+          schema:
+            type: boolean
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: term
+          in: query
+          schema:
+            type: string
+        - name: ats_source
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of jobs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Job"
+
+  /jobs/digest:
+    get:
+      operationId: getDigest
+      tags: [jobs]
+      summary: Get today's internship digest
+      responses:
+        "200":
+          description: Daily digest
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Digest"
+
+  /scrape/run:
+    post:
+      operationId: runScrape
+      tags: [scrape]
+      summary: Trigger a full scrape run across all firms
+      responses:
+        "200":
+          description: Scrape run result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ScrapeResult"
+
+  /scrape/firms/{id}:
+    post:
+      operationId: scrapeFirm
+      tags: [scrape]
+      summary: Scrape jobs for a specific firm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Scrape result for firm
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FirmScrapeResult"
+        "404":
+          description: Not found
+
+  /stats:
+    get:
+      operationId: getStats
+      tags: [stats]
+      summary: Get dashboard statistics
+      responses:
+        "200":
+          description: Dashboard stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Stats"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +246,198 @@ components:
       required:
         - status
 
+    Firm:
+      type: object
+      required: [id, name, rank, hqCity, hqState, websiteUrl, careersUrl, atsType, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        rank:
+          type: integer
+        hqCity:
+          type: string
+        hqState:
+          type: string
+        websiteUrl:
+          type: string
+        careersUrl:
+          type: string
+        atsType:
+          type: string
+          description: "ATS provider: workday, greenhouse, lever, icims, smartrecruiters, ashby, jobvite, custom, unknown"
+        atsUrl:
+          type: ["string", "null"]
+        lastChecked:
+          type: ["string", "null"]
+        jobsCount:
+          type: integer
+        createdAt:
+          type: string
+
+    FirmInput:
+      type: object
+      required: [name, rank, hqCity, hqState, websiteUrl, careersUrl]
+      properties:
+        name:
+          type: string
+        rank:
+          type: integer
+        hqCity:
+          type: string
+        hqState:
+          type: string
+        websiteUrl:
+          type: string
+        careersUrl:
+          type: string
+        atsType:
+          type: string
+        atsUrl:
+          type: string
+
+    FirmUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+        rank:
+          type: integer
+        hqCity:
+          type: string
+        hqState:
+          type: string
+        websiteUrl:
+          type: string
+        careersUrl:
+          type: string
+        atsType:
+          type: string
+        atsUrl:
+          type: ["string", "null"]
+
+    AtsDetectionResult:
+      type: object
+      required: [firmId, atsType, detectedUrl, success]
+      properties:
+        firmId:
+          type: integer
+        atsType:
+          type: string
+        detectedUrl:
+          type: ["string", "null"]
+        success:
+          type: boolean
+        message:
+          type: ["string", "null"]
+
+    Job:
+      type: object
+      required: [id, firmId, firmName, title, isActive, atsSource, firstSeen, lastSeen]
+      properties:
+        id:
+          type: integer
+        firmId:
+          type: integer
+        firmName:
+          type: string
+        title:
+          type: string
+        location:
+          type: ["string", "null"]
+        applyUrl:
+          type: ["string", "null"]
+        term:
+          type: ["string", "null"]
+        atsSource:
+          type: string
+        isActive:
+          type: boolean
+        firstSeen:
+          type: string
+        lastSeen:
+          type: string
+
+    Digest:
+      type: object
+      required: [date, newToday, stillOpen, totalActive]
+      properties:
+        date:
+          type: string
+        newToday:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+        stillOpen:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+        totalActive:
+          type: integer
+
+    ScrapeResult:
+      type: object
+      required: [startedAt, firmsProcessed, jobsFound, jobsNew, errors]
+      properties:
+        startedAt:
+          type: string
+        firmsProcessed:
+          type: integer
+        jobsFound:
+          type: integer
+        jobsNew:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+
+    FirmScrapeResult:
+      type: object
+      required: [firmId, firmName, atsType, jobsFound, jobsNew, success]
+      properties:
+        firmId:
+          type: integer
+        firmName:
+          type: string
+        atsType:
+          type: string
+        jobsFound:
+          type: integer
+        jobsNew:
+          type: integer
+        success:
+          type: boolean
+        error:
+          type: ["string", "null"]
+
+    Stats:
+      type: object
+      required: [totalFirms, totalActiveJobs, newJobsToday, firmsScannedToday, firmsByAts, recentJobs]
+      properties:
+        totalFirms:
+          type: integer
+        totalActiveJobs:
+          type: integer
+        newJobsToday:
+          type: integer
+        firmsScannedToday:
+          type: integer
+        firmsByAts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AtsBucket"
+        recentJobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/Job"
+
+    AtsBucket:
+      type: object
+      required: [atsType, count]
+      properties:
+        atsType:
+          type: string
+        count:
+          type: integer
