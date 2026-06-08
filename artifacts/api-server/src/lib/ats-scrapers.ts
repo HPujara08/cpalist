@@ -108,16 +108,23 @@ export async function scrapeLever(companySlug: string): Promise<ScrapedJob[]> {
   }
 }
 
-export async function scrapeWorkday(subdomain: string, tenant: string): Promise<ScrapedJob[]> {
+export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
   try {
-    const url = `https://${subdomain}.wd5.myworkdayjobs.com/wday/cxs/${subdomain}/${tenant}/jobs`;
-    const res = await fetch(url, {
+    const parsed = new URL(atsUrl);
+    const subdomain = parsed.hostname.split(".")[0];
+    const baseHost = parsed.hostname;
+    const pathParts = parsed.pathname.split("/").filter(Boolean);
+    const jobBoard = pathParts[0] ?? "External";
+    const apiUrl = `https://${baseHost}/wday/cxs/${subdomain}/${jobBoard}/jobs`;
+
+    const res = await fetch(apiUrl, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "User-Agent": "CPA-Intern-Radar/1.0",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
       },
-      body: JSON.stringify({ limit: 100, offset: 0, searchText: "intern" }),
+      body: JSON.stringify({ limit: 100, offset: 0, searchText: "intern", appliedFacets: {} }),
       signal: AbortSignal.timeout(20000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -129,13 +136,13 @@ export async function scrapeWorkday(subdomain: string, tenant: string): Promise<
         title: j.title,
         location: j.locationsText ?? null,
         applyUrl: j.externalPath
-          ? `https://${subdomain}.wd5.myworkdayjobs.com${j.externalPath}`
+          ? `https://${baseHost}${j.externalPath}`
           : null,
         term: detectTerm(j.title),
         contentHash: simpleHash(`workday:${subdomain}:${j.title}:${j.locationsText ?? ""}`),
       }));
   } catch (err) {
-    logger.warn({ err, subdomain }, "Workday scrape failed");
+    logger.warn({ err, atsUrl }, "Workday scrape failed");
     return [];
   }
 }
@@ -241,44 +248,33 @@ function classifyAtsUrl(url: string): { atsType: AtsType; atsUrl: string | null 
   return { atsType: "custom", atsUrl: url };
 }
 
-export function extractAtsSlug(atsType: AtsType, atsUrl: string | null): { subdomain?: string; slug?: string } {
-  if (!atsUrl) return {};
+function extractPathSlug(atsUrl: string): string | null {
   try {
     const url = new URL(atsUrl);
-    if (atsType === "greenhouse") {
-      const match = url.pathname.match(/\/boards\/([^/]+)/);
-      return { slug: match?.[1] };
-    }
-    if (atsType === "lever") {
-      const match = url.pathname.match(/\/postings\/([^/]+)/);
-      return { slug: match?.[1] ?? url.hostname.split(".")[0] };
-    }
-    if (atsType === "workday") {
-      const subdomain = url.hostname.split(".")[0];
-      const tenant = url.pathname.split("/").filter(Boolean)[2] ?? "External";
-      return { subdomain, slug: tenant };
-    }
-    if (atsType === "ashby") {
-      const match = url.pathname.match(/\/([^/]+)$/);
-      return { slug: match?.[1] };
-    }
-    if (atsType === "smartrecruiters") {
-      const match = url.pathname.match(/\/([^/]+)$/);
-      return { slug: match?.[1] ?? url.hostname.split(".")[0] };
-    }
-    return {};
+    return url.pathname.split("/").filter(Boolean)[0] ?? null;
   } catch {
-    return {};
+    return null;
   }
 }
 
 export async function scrapeByAts(atsType: AtsType, atsUrl: string | null): Promise<ScrapedJob[]> {
   if (!atsUrl) return [];
-  const { subdomain, slug } = extractAtsSlug(atsType, atsUrl);
-  if (atsType === "greenhouse" && slug) return scrapeGreenhouse(slug);
-  if (atsType === "lever" && slug) return scrapeLever(slug);
-  if (atsType === "workday" && subdomain && slug) return scrapeWorkday(subdomain, slug);
-  if (atsType === "ashby" && slug) return scrapeAshby(slug);
-  if (atsType === "smartrecruiters" && slug) return scrapeSmartRecruiters(slug);
+  if (atsType === "greenhouse") {
+    const slug = extractPathSlug(atsUrl);
+    return slug ? scrapeGreenhouse(slug) : [];
+  }
+  if (atsType === "lever") {
+    const slug = extractPathSlug(atsUrl);
+    return slug ? scrapeLever(slug) : [];
+  }
+  if (atsType === "workday") return scrapeWorkday(atsUrl);
+  if (atsType === "ashby") {
+    const slug = extractPathSlug(atsUrl);
+    return slug ? scrapeAshby(slug) : [];
+  }
+  if (atsType === "smartrecruiters") {
+    const slug = extractPathSlug(atsUrl);
+    return slug ? scrapeSmartRecruiters(slug) : [];
+  }
   return [];
 }

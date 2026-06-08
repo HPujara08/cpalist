@@ -14,7 +14,7 @@ export const jobsTable = pgTable("jobs", {
   term: text("term"),
   atsSource: text("ats_source").notNull().default("unknown"),
   isActive: boolean("is_active").notNull().default(true),
-  contentHash: text("content_hash").notNull(),
+  contentHash: text("content_hash").notNull().unique(),
   firstSeen: timestamp("first_seen", { withTimezone: true }).notNull().defaultNow(),
   lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
 });
