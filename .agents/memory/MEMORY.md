@@ -1,0 +1,3 @@
+- [Playwright on NixOS](playwright-nixos.md) — must use nix-built Chromium (`which chromium`), not Playwright's downloaded binary
+- [Workday API CSRF](workday-api-csrf.md) — Workday CXS POST requires browser session; use `page.evaluate()` to call from within Playwright context
+- [DB content_hash unique](db-content-hash.md) — `ON CONFLICT (content_hash)` silently fails unless the column has a UNIQUE constraint

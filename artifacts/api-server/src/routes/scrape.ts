@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
-import { eq, and } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { db, firmsTable, jobsTable } from "@workspace/db";
 import { ScrapeFirmParams } from "@workspace/api-zod";
-import { scrapeByAts, type AtsType } from "../lib/ats-scrapers";
+import { scrapeByAts, detectAts, type AtsType } from "../lib/ats-scrapers";
 
 const router: IRouter = Router();
 
@@ -16,19 +16,30 @@ async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promise<{
   error: string | null;
 }> {
   try {
-    const jobs = await scrapeByAts(firm.atsType as AtsType, firm.atsUrl);
+    let atsType = firm.atsType as AtsType;
+    let atsUrl = firm.atsUrl;
+
+    if ((atsType === "unknown" || atsType === "custom") && firm.careersUrl) {
+      const detected = await detectAts(firm.careersUrl);
+      atsType = detected.atsType;
+      atsUrl = detected.atsUrl;
+
+      if (detected.atsType !== "unknown" && detected.atsType !== "custom") {
+        await db
+          .update(firmsTable)
+          .set({ atsType: detected.atsType, atsUrl: detected.atsUrl })
+          .where(eq(firmsTable.id, firm.id));
+      }
+    }
+
+    const jobs = await scrapeByAts(atsType, atsUrl);
 
     let jobsNew = 0;
     for (const job of jobs) {
       const [existing] = await db
         .select({ id: jobsTable.id })
         .from(jobsTable)
-        .where(
-          and(
-            eq(jobsTable.firmId, firm.id),
-            eq(jobsTable.contentHash, job.contentHash)
-          )
-        );
+        .where(eq(jobsTable.contentHash, job.contentHash));
 
       if (!existing) {
         await db.insert(jobsTable).values({
@@ -37,7 +48,7 @@ async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promise<{
           location: job.location,
           applyUrl: job.applyUrl,
           term: job.term,
-          atsSource: firm.atsType,
+          atsSource: atsType,
           isActive: true,
           contentHash: job.contentHash,
         });
@@ -45,7 +56,7 @@ async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promise<{
       } else {
         await db
           .update(jobsTable)
-          .set({ lastSeen: new Date(), isActive: true })
+          .set({ lastSeen: new Date(), isActive: true, applyUrl: job.applyUrl })
           .where(eq(jobsTable.id, existing.id));
       }
     }
@@ -58,7 +69,7 @@ async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promise<{
     return {
       firmId: firm.id,
       firmName: firm.name,
-      atsType: firm.atsType,
+      atsType,
       jobsFound: jobs.length,
       jobsNew,
       success: true,
@@ -82,25 +93,7 @@ router.post("/scrape/run", async (req, res): Promise<void> => {
   const startedAt = new Date();
   req.log.info("Starting full scrape run");
 
-  const firms = await db
-    .select()
-    .from(firmsTable)
-    .where(eq(firmsTable.atsType, "greenhouse"))
-    .limit(50);
-
-  const leverFirms = await db
-    .select()
-    .from(firmsTable)
-    .where(eq(firmsTable.atsType, "lever"))
-    .limit(50);
-
-  const workdayFirms = await db
-    .select()
-    .from(firmsTable)
-    .where(eq(firmsTable.atsType, "workday"))
-    .limit(50);
-
-  const allFirms = [...firms, ...leverFirms, ...workdayFirms];
+  const allFirms = await db.select().from(firmsTable).limit(50);
 
   let firmsProcessed = 0;
   let jobsFound = 0;

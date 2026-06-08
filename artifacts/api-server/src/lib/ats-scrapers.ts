@@ -1,4 +1,17 @@
+import { chromium } from "playwright";
+import { execSync } from "node:child_process";
 import { logger } from "./logger";
+
+function findChromiumExecutable(): string | undefined {
+  try {
+    const p = execSync("which chromium 2>/dev/null || which chromium-browser 2>/dev/null", { encoding: "utf-8" }).trim();
+    return p || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const CHROMIUM_EXECUTABLE = findChromiumExecutable();
 
 export type ScrapedJob = {
   title: string;
@@ -7,6 +20,8 @@ export type ScrapedJob = {
   term: string | null;
   contentHash: string;
 };
+
+export type AtsType = "greenhouse" | "lever" | "workday" | "ashby" | "smartrecruiters" | "icims" | "jobvite" | "custom" | "unknown";
 
 const INTERN_KEYWORDS = [
   "intern",
@@ -33,23 +48,23 @@ const EXCLUDE_KEYWORDS = [
   "principal",
 ];
 
-function isInternship(title: string): boolean {
+export function isInternship(title: string): boolean {
   const lower = title.toLowerCase();
   const isMatch = INTERN_KEYWORDS.some((kw) => lower.includes(kw));
   const isExcluded = EXCLUDE_KEYWORDS.some((kw) => lower.includes(kw));
   return isMatch && !isExcluded;
 }
 
-function detectTerm(title: string): string | null {
+export function detectTerm(title: string): string | null {
   const lower = title.toLowerCase();
-  if (lower.includes("summer")) return "Summer";
-  if (lower.includes("winter")) return "Winter";
-  if (lower.includes("fall") || lower.includes("autumn")) return "Fall";
-  if (lower.includes("spring")) return "Spring";
+  if (lower.includes("summer")) return "summer";
+  if (lower.includes("winter")) return "winter";
+  if (lower.includes("fall") || lower.includes("autumn")) return "fall";
+  if (lower.includes("spring")) return "spring";
   return null;
 }
 
-function simpleHash(str: string): string {
+export function simpleHash(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++) {
     const char = str.charCodeAt(i);
@@ -58,6 +73,25 @@ function simpleHash(str: string): string {
   }
   return Math.abs(hash).toString(16);
 }
+
+export function classifyAtsUrl(url: string): { atsType: AtsType; atsUrl: string | null } {
+  if (url.includes("myworkdayjobs.com")) return { atsType: "workday", atsUrl: url };
+  if (url.includes("greenhouse.io")) return { atsType: "greenhouse", atsUrl: url };
+  if (url.includes("lever.co")) return { atsType: "lever", atsUrl: url };
+  if (url.includes("icims.com")) return { atsType: "icims", atsUrl: url };
+  if (url.includes("smartrecruiters.com")) return { atsType: "smartrecruiters", atsUrl: url };
+  if (url.includes("ashbyhq.com")) return { atsType: "ashby", atsUrl: url };
+  if (url.includes("jobvite.com")) return { atsType: "jobvite", atsUrl: url };
+  return { atsType: "custom", atsUrl: url };
+}
+
+const PLAYWRIGHT_ARGS = [
+  "--no-sandbox",
+  "--disable-setuid-sandbox",
+  "--disable-dev-shm-usage",
+  "--disable-gpu",
+  "--disable-extensions",
+];
 
 export async function scrapeGreenhouse(companySlug: string): Promise<ScrapedJob[]> {
   try {
@@ -108,42 +142,77 @@ export async function scrapeLever(companySlug: string): Promise<ScrapedJob[]> {
   }
 }
 
-export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
-  try {
-    const parsed = new URL(atsUrl);
-    const subdomain = parsed.hostname.split(".")[0];
-    const baseHost = parsed.hostname;
-    const pathParts = parsed.pathname.split("/").filter(Boolean);
-    const jobBoard = pathParts[0] ?? "External";
-    const apiUrl = `https://${baseHost}/wday/cxs/${subdomain}/${jobBoard}/jobs`;
+type WorkdayPosting = {
+  title: string;
+  locationsText?: string;
+  externalPath?: string;
+  total?: number;
+};
 
-    const res = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-      body: JSON.stringify({ limit: 100, offset: 0, searchText: "intern", appliedFacets: {} }),
-      signal: AbortSignal.timeout(20000),
+type WorkdayApiResponse = {
+  jobPostings?: WorkdayPosting[];
+  total?: number;
+};
+
+export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
+  const parsed = new URL(atsUrl);
+  const subdomain = parsed.hostname.split(".")[0]!;
+  const baseHost = parsed.hostname;
+  const pathParts = parsed.pathname.split("/").filter(Boolean);
+  const jobBoard = pathParts[0] ?? "External";
+  const apiPath = `/wday/cxs/${subdomain}/${jobBoard}/jobs`;
+
+  const browser = await chromium.launch({ headless: true, args: PLAYWRIGHT_ARGS, executablePath: CHROMIUM_EXECUTABLE });
+  try {
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data = await res.json() as { jobPostings?: Array<{ title: string; locationsText?: string; externalPath?: string }> };
-    const postings = data.jobPostings ?? [];
-    return postings
+    const page = await context.newPage();
+
+    await page.goto(atsUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
+
+    const allPostings: WorkdayPosting[] = [];
+    const LIMIT = 50;
+
+    const fetchPage = async (offset: number): Promise<WorkdayApiResponse> => {
+      return page.evaluate(
+        async ({ path, host, limit, offset: off }) => {
+          const res = await fetch(`https://${host}${path}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({ limit, offset: off, searchText: "intern", appliedFacets: {} }),
+          });
+          return res.json();
+        },
+        { path: apiPath, host: baseHost, limit: LIMIT, offset }
+      ) as Promise<WorkdayApiResponse>;
+    };
+
+    const first = await fetchPage(0);
+    const postings = first.jobPostings ?? [];
+    allPostings.push(...postings);
+
+    const total = first.total ?? postings.length;
+    const pages = Math.ceil(total / LIMIT);
+    for (let p = 1; p < Math.min(pages, 5); p++) {
+      const more = await fetchPage(p * LIMIT);
+      allPostings.push(...(more.jobPostings ?? []));
+    }
+
+    return allPostings
       .filter((j) => isInternship(j.title))
       .map((j) => ({
         title: j.title,
         location: j.locationsText ?? null,
-        applyUrl: j.externalPath
-          ? `https://${baseHost}${j.externalPath}`
-          : null,
+        applyUrl: j.externalPath ? `https://${baseHost}${j.externalPath}` : null,
         term: detectTerm(j.title),
-        contentHash: simpleHash(`workday:${subdomain}:${j.title}:${j.locationsText ?? ""}`),
+        contentHash: simpleHash(`workday:${baseHost}:${j.title}:${j.locationsText ?? ""}`),
       }));
   } catch (err) {
-    logger.warn({ err, atsUrl }, "Workday scrape failed");
+    logger.warn({ err, atsUrl }, "Workday Playwright scrape failed");
     return [];
+  } finally {
+    await browser.close();
   }
 }
 
@@ -210,42 +279,66 @@ export async function scrapeSmartRecruiters(companyId: string): Promise<ScrapedJ
   }
 }
 
-export type AtsType = "greenhouse" | "lever" | "workday" | "ashby" | "smartrecruiters" | "icims" | "jobvite" | "custom" | "unknown";
-
 export async function detectAts(careersUrl: string): Promise<{ atsType: AtsType; atsUrl: string | null }> {
+  const browser = await chromium.launch({ headless: true, args: PLAYWRIGHT_ARGS, executablePath: CHROMIUM_EXECUTABLE });
   try {
-    const res = await fetch(careersUrl, {
-      method: "HEAD",
-      redirect: "follow",
-      signal: AbortSignal.timeout(10000),
-      headers: { "User-Agent": "CPA-Intern-Radar/1.0" },
+    const context = await browser.newContext({
+      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     });
-    const finalUrl = res.url;
-    return classifyAtsUrl(finalUrl);
-  } catch {
-    try {
-      const res = await fetch(careersUrl, {
-        redirect: "follow",
-        signal: AbortSignal.timeout(15000),
-        headers: { "User-Agent": "CPA-Intern-Radar/1.0" },
-      });
-      return classifyAtsUrl(res.url);
-    } catch (err) {
-      logger.warn({ err, careersUrl }, "ATS detection failed");
-      return { atsType: "unknown", atsUrl: null };
-    }
-  }
-}
+    const page = await context.newPage();
 
-function classifyAtsUrl(url: string): { atsType: AtsType; atsUrl: string | null } {
-  if (url.includes("myworkdayjobs.com")) return { atsType: "workday", atsUrl: url };
-  if (url.includes("greenhouse.io")) return { atsType: "greenhouse", atsUrl: url };
-  if (url.includes("lever.co")) return { atsType: "lever", atsUrl: url };
-  if (url.includes("icims.com")) return { atsType: "icims", atsUrl: url };
-  if (url.includes("smartrecruiters.com")) return { atsType: "smartrecruiters", atsUrl: url };
-  if (url.includes("ashbyhq.com")) return { atsType: "ashby", atsUrl: url };
-  if (url.includes("jobvite.com")) return { atsType: "jobvite", atsUrl: url };
-  return { atsType: "custom", atsUrl: url };
+    const requestedUrls: string[] = [];
+    page.on("request", (req) => {
+      requestedUrls.push(req.url());
+    });
+
+    try {
+      await page.goto(careersUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
+      await page.waitForTimeout(3000);
+    } catch {
+      // proceed with whatever we got
+    }
+
+    const finalUrl = page.url();
+    const fromFinal = classifyAtsUrl(finalUrl);
+    if (fromFinal.atsType !== "custom" && fromFinal.atsType !== "unknown") {
+      return fromFinal;
+    }
+
+    for (const url of requestedUrls) {
+      const c = classifyAtsUrl(url);
+      if (c.atsType !== "custom" && c.atsType !== "unknown") {
+        return c;
+      }
+    }
+
+    const iframeSrcs = await page
+      .$$eval("iframe[src]", (els) => els.map((e) => e.getAttribute("src") ?? ""))
+      .catch(() => [] as string[]);
+    for (const src of iframeSrcs) {
+      const c = classifyAtsUrl(src);
+      if (c.atsType !== "custom" && c.atsType !== "unknown") {
+        return c;
+      }
+    }
+
+    const links = await page
+      .$$eval("a[href]", (els) => els.map((e) => e.getAttribute("href") ?? ""))
+      .catch(() => [] as string[]);
+    for (const link of links) {
+      const c = classifyAtsUrl(link);
+      if (c.atsType !== "custom" && c.atsType !== "unknown") {
+        return c;
+      }
+    }
+
+    return { atsType: "custom", atsUrl: finalUrl };
+  } catch (err) {
+    logger.warn({ err, careersUrl }, "Playwright ATS detection failed");
+    return { atsType: "unknown", atsUrl: null };
+  } finally {
+    await browser.close();
+  }
 }
 
 function extractPathSlug(atsUrl: string): string | null {
