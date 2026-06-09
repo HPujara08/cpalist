@@ -93,7 +93,7 @@ router.post("/scrape/run", async (req, res): Promise<void> => {
   const startedAt = new Date();
   req.log.info("Starting full scrape run");
 
-  const allFirms = await db.select().from(firmsTable).limit(50);
+  const allFirms = await db.select().from(firmsTable).orderBy(firmsTable.rank);
 
   let firmsProcessed = 0;
   let jobsFound = 0;

@@ -21,6 +21,32 @@ export type ScrapedJob = {
   contentHash: string;
 };
 
+const US_STATE_CODES = new Set([
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA",
+  "HI","ID","IL","IN","IA","KS","KY","LA","ME","MD",
+  "MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ",
+  "NM","NY","NC","ND","OH","OK","OR","PA","RI","SC",
+  "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
+]);
+
+export function isUsLocation(location: string | null): boolean {
+  if (!location || location.trim() === "") return true; // unspecified → keep
+  const loc = location.trim();
+  if (/\bremote\b/i.test(loc)) return true;
+  if (/\bunited states\b|\bU\.?S\.?A\.?\b/i.test(loc)) return true;
+  // Check each semicolon/pipe-separated segment for "City, ST" pattern
+  const segments = loc.split(/[;|]+/);
+  for (const seg of segments) {
+    const m = seg.trim().match(/,\s*([A-Z]{2})\s*$/);
+    if (m && US_STATE_CODES.has(m[1])) return true;
+    if (US_STATE_CODES.has(seg.trim().toUpperCase())) return true;
+  }
+  // Location string exists but has no US state markers
+  // Keep single-token locations (just a city name, no comma) — might be US
+  if (!loc.includes(",") && !loc.includes(";")) return true;
+  return false;
+}
+
 export type AtsType = "greenhouse" | "lever" | "workday" | "ashby" | "smartrecruiters" | "icims" | "jobvite" | "custom" | "unknown";
 
 const INTERN_WORD_PATTERNS = [
@@ -98,7 +124,7 @@ export async function scrapeGreenhouse(companySlug: string): Promise<ScrapedJob[
     const data = await res.json() as { jobs?: Array<{ title: string; location?: { name?: string }; absolute_url?: string }> };
     const jobs = data.jobs ?? [];
     return jobs
-      .filter((j) => isInternship(j.title))
+      .filter((j) => isInternship(j.title) && isUsLocation(j.location?.name ?? null))
       .map((j) => ({
         title: j.title,
         location: j.location?.name ?? null,
@@ -122,7 +148,7 @@ export async function scrapeLever(companySlug: string): Promise<ScrapedJob[]> {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const jobs = await res.json() as Array<{ text: string; categories?: { location?: string; commitment?: string }; hostedUrl?: string }>;
     return jobs
-      .filter((j) => isInternship(j.text))
+      .filter((j) => isInternship(j.text) && isUsLocation(j.categories?.location ?? null))
       .map((j) => ({
         title: j.text,
         location: j.categories?.location ?? null,
@@ -194,7 +220,7 @@ export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
     }
 
     return allPostings
-      .filter((j) => isInternship(j.title))
+      .filter((j) => isInternship(j.title) && isUsLocation(j.locationsText ?? null))
       .map((j) => ({
         title: j.title,
         location: j.locationsText ?? null,
@@ -234,7 +260,7 @@ export async function scrapeAshby(companySlug: string): Promise<ScrapedJob[]> {
     const data = await res.json() as { data?: { jobBoard?: { jobPostings?: Array<{ title: string; locationName?: string; jobUrl?: string }> } } };
     const postings = data.data?.jobBoard?.jobPostings ?? [];
     return postings
-      .filter((j) => isInternship(j.title))
+      .filter((j) => isInternship(j.title) && isUsLocation(j.locationName ?? null))
       .map((j) => ({
         title: j.title,
         location: j.locationName ?? null,
@@ -259,7 +285,10 @@ export async function scrapeSmartRecruiters(companyId: string): Promise<ScrapedJ
     const data = await res.json() as { content?: Array<{ name: string; location?: { city?: string; region?: string }; ref?: string }> };
     const postings = data.content ?? [];
     return postings
-      .filter((j) => isInternship(j.name))
+      .filter((j) => {
+        const loc = [j.location?.city, j.location?.region].filter(Boolean).join(", ") || null;
+        return isInternship(j.name) && isUsLocation(loc);
+      })
       .map((j) => ({
         title: j.name,
         location: [j.location?.city, j.location?.region].filter(Boolean).join(", ") || null,
