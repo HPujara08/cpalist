@@ -23,20 +23,14 @@ export type ScrapedJob = {
 
 export type AtsType = "greenhouse" | "lever" | "workday" | "ashby" | "smartrecruiters" | "icims" | "jobvite" | "custom" | "unknown";
 
-const INTERN_KEYWORDS = [
-  "intern",
-  "internship",
-  "co-op",
-  "coop",
-  "summer 2025",
-  "summer 2026",
-  "summer 2027",
-  "winter 2025",
-  "winter 2026",
-  "winter 2027",
-  "fall 2025",
-  "fall 2026",
-  "fall 2027",
+const INTERN_WORD_PATTERNS = [
+  /\bintern(ship)?\b/i,
+  /\bco[-\s]?op\b/i,
+  /\bpraktikum\b/i,
+  /\bsummer\s+20\d\d\b/i,
+  /\bwinter\s+20\d\d\b/i,
+  /\bfall\s+20\d\d\b/i,
+  /\bspring\s+20\d\d\b/i,
 ];
 
 const EXCLUDE_KEYWORDS = [
@@ -49,8 +43,8 @@ const EXCLUDE_KEYWORDS = [
 ];
 
 export function isInternship(title: string): boolean {
+  const isMatch = INTERN_WORD_PATTERNS.some((re) => re.test(title));
   const lower = title.toLowerCase();
-  const isMatch = INTERN_KEYWORDS.some((kw) => lower.includes(kw));
   const isExcluded = EXCLUDE_KEYWORDS.some((kw) => lower.includes(kw));
   return isMatch && !isExcluded;
 }
