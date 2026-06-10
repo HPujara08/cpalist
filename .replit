@@ -37,4 +37,4 @@ channel = "stable-25_05"
 [userenv]
 
 [userenv.shared]
-RECIPIENT_EMAILS = "haasilp08@gmail.com"
+RECIPIENT_EMAILS = "haasilp08@gmail.com,jackie.lai225@gmail.com,hpujara08@gmail.com"
