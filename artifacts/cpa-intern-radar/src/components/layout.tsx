@@ -15,8 +15,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen bg-background text-foreground">
       <div className="w-64 border-r border-border bg-card flex flex-col hidden md:flex">
-        <div className="h-16 flex items-center px-6 border-b border-border">
-          <span className="font-bold text-lg tracking-tight">CPA Intern Radar</span>
+        <div className="h-16 flex items-center px-6 border-b border-border gap-2">
+          <span className="font-extrabold text-lg tracking-tight">CPAList</span>
+          <span className="text-xs text-muted-foreground font-medium mt-0.5">admin</span>
         </div>
         <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
           {navigation.map((item) => {
@@ -38,10 +39,15 @@ export function Layout({ children }: { children: React.ReactNode }) {
             );
           })}
         </nav>
+        <div className="p-4 border-t border-border">
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Scraping 21 firms/hour · Email at midnight EST
+          </p>
+        </div>
       </div>
       <div className="flex-1 flex flex-col h-screen overflow-hidden">
         <header className="h-16 border-b border-border bg-card flex items-center px-6 md:hidden">
-          <span className="font-bold text-lg tracking-tight">CPA Intern Radar</span>
+          <span className="font-extrabold text-lg tracking-tight">CPAList</span>
         </header>
         <main className="flex-1 overflow-y-auto bg-background p-6">
           <div className="max-w-6xl mx-auto">

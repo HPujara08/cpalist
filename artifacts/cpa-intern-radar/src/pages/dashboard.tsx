@@ -13,21 +13,21 @@ export default function Dashboard() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
   const runDigest = useRunDailyDigest();
-  const [lastSent, setLastSent] = useState<{ emailSent: boolean; newJobs?: number } | null>(null);
+  const [lastSent, setLastSent] = useState<{ emailSent: boolean } | null>(null);
 
   const handleSendDigest = () => {
     setLastSent(null);
     runDigest.mutate(undefined, {
       onSuccess: (data) => {
-        setLastSent({ emailSent: data.emailSent, newJobs: data.jobsNew });
+        setLastSent({ emailSent: data.emailSent });
         if (data.emailSent) {
           toast({
-            title: "✅ Digest sent!",
-            description: `Scraped ${data.firmsProcessed} firms · ${data.jobsNew} new jobs · email delivered.`,
+            title: "✅ CPAList digest sent!",
+            description: "Email delivered with all postings from the past 24 hours.",
           });
         } else {
           toast({
-            title: "Scrape done, email failed",
+            title: "Email failed to send",
             description: data.emailError ?? "Unknown error",
             variant: "destructive",
           });
@@ -35,7 +35,7 @@ export default function Dashboard() {
         queryClient.invalidateQueries();
       },
       onError: () => {
-        toast({ title: "Daily digest failed", variant: "destructive" });
+        toast({ title: "Failed to send digest", variant: "destructive" });
       },
     });
   };
@@ -68,7 +68,7 @@ export default function Dashboard() {
             className="whitespace-nowrap"
           >
             {runDigest.isPending ? (
-              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Running scrape + sending…</>
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Sending digest…</>
             ) : (
               <><Mail className="w-4 h-4 mr-2" />Send Digest Now</>
             )}
@@ -80,7 +80,7 @@ export default function Dashboard() {
                 : <><AlertCircle className="w-3.5 h-3.5 text-destructive" />Email failed</>}
             </div>
           )}
-          <p className="text-xs text-muted-foreground">Runs automatically daily at 07:00 UTC</p>
+          <p className="text-xs text-muted-foreground">Sends last 24 hrs of postings · no rescrape</p>
         </div>
       </div>
 
@@ -147,7 +147,7 @@ export default function Dashboard() {
                     <span>{format(new Date(job.firstSeen), "MMM d, yyyy")}</span>
                     {job.applyUrl && (
                       <a href={job.applyUrl} target="_blank" rel="noreferrer" className="text-primary hover:underline font-medium">
-                        View Role
+                        Apply →
                       </a>
                     )}
                   </div>

@@ -12,6 +12,7 @@ export type DigestJob = {
   location: string | null;
   applyUrl: string | null;
   term: string | null;
+  firstSeen: Date | string;
 };
 
 export type DigestPayload = {
@@ -21,100 +22,101 @@ export type DigestPayload = {
   totalActive: number;
 };
 
-function termBadge(term: string | null): string {
-  if (!term) return "";
-  const colors: Record<string, string> = {
-    summer: "#f59e0b",
-    winter: "#3b82f6",
-    fall: "#ef4444",
-    spring: "#22c55e",
-  };
-  const color = colors[term] ?? "#6b7280";
-  return `<span style="background:${color};color:#fff;font-size:11px;padding:2px 8px;border-radius:12px;margin-left:8px;text-transform:uppercase;font-weight:600;">${term}</span>`;
+function formatDate(d: Date | string): string {
+  return new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 }
 
-function jobRow(job: DigestJob): string {
+function jobRow(job: DigestJob, isNew: boolean): string {
+  const applyCell = job.applyUrl
+    ? `<a href="${job.applyUrl}" style="display:inline-block;background:#18181b;color:#fff;padding:5px 14px;border-radius:4px;text-decoration:none;font-size:12px;font-weight:500;letter-spacing:0.2px;white-space:nowrap;">Apply →</a>`
+    : "";
+  const newTag = isNew
+    ? `<span style="display:inline-block;background:#dcfce7;color:#15803d;font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;letter-spacing:0.5px;text-transform:uppercase;margin-left:8px;vertical-align:middle;">NEW</span>`
+    : "";
   return `
-    <tr>
-      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;vertical-align:top;">
-        <div style="font-weight:600;color:#111827;">${job.firmName}${termBadge(job.term)}</div>
-        <div style="color:#374151;margin-top:3px;">${job.title}</div>
-        ${job.location ? `<div style="color:#9ca3af;font-size:13px;margin-top:3px;">📍 ${job.location}</div>` : ""}
-      </td>
-      <td style="padding:12px 0;border-bottom:1px solid #f3f4f6;text-align:right;vertical-align:top;white-space:nowrap;width:100px;">
-        ${job.applyUrl ? `<a href="${job.applyUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:6px 14px;border-radius:6px;text-decoration:none;font-size:13px;font-weight:500;">Apply →</a>` : ""}
-      </td>
-    </tr>`;
+<tr>
+  <td style="padding:16px 0;border-bottom:1px solid #f4f4f5;vertical-align:top;">
+    <table width="100%" cellpadding="0" cellspacing="0">
+      <tr>
+        <td style="vertical-align:top;">
+          <div style="font-size:15px;font-weight:700;color:#18181b;line-height:1.3;">${job.firmName}${newTag}</div>
+          <div style="font-size:14px;color:#3f3f46;margin-top:4px;">${job.title}</div>
+          <div style="font-size:12px;color:#71717a;margin-top:5px;">
+            ${job.location ? `<span>${job.location}</span> · ` : ""}<span>${formatDate(job.firstSeen)}</span>
+          </div>
+        </td>
+        <td style="vertical-align:middle;text-align:right;padding-left:16px;width:90px;">${applyCell}</td>
+      </tr>
+    </table>
+  </td>
+</tr>`;
 }
 
 function buildHtml(payload: DigestPayload): string {
-  const newRows = payload.newToday.map(jobRow).join("");
-  const openJobs = payload.stillOpen.slice(0, 50);
-  const openRows = openJobs.map(jobRow).join("");
-  const overflow = payload.stillOpen.length > 50 ? payload.stillOpen.length - 50 : 0;
+  const newRows = payload.newToday.map((j) => jobRow(j, true)).join("");
+  const openJobs = payload.stillOpen.slice(0, 40);
+  const openRows = openJobs.map((j) => jobRow(j, false)).join("");
+  const overflow = payload.stillOpen.length > 40 ? payload.stillOpen.length - 40 : 0;
+  const total = payload.newToday.length;
 
   return `<!DOCTYPE html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>CPA Intern Radar — Daily Digest</title></head>
-<body style="margin:0;padding:0;background:#f9fafb;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-<table width="100%" cellpadding="0" cellspacing="0" style="background:#f9fafb;padding:32px 16px;">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CPAList — Daily Internship Digest</title>
+</head>
+<body style="margin:0;padding:0;background:#fafafa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;">
+<table width="100%" cellpadding="0" cellspacing="0" style="background:#fafafa;padding:40px 16px;">
 <tr><td align="center">
-<table width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;">
+<table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
 
 <!-- Header -->
-<tr><td style="background:#1e3a5f;border-radius:12px 12px 0 0;padding:28px 32px;">
-  <div style="color:#fff;font-size:22px;font-weight:700;letter-spacing:-0.3px;">📊 CPA Intern Radar</div>
-  <div style="color:#93c5fd;font-size:14px;margin-top:6px;">Daily Internship Digest · ${payload.date}</div>
+<tr><td style="padding-bottom:32px;">
+  <table width="100%" cellpadding="0" cellspacing="0">
+    <tr>
+      <td>
+        <div style="font-size:26px;font-weight:800;color:#18181b;letter-spacing:-0.5px;">CPAList</div>
+        <div style="font-size:13px;color:#71717a;margin-top:4px;">Your daily CPA internship digest · ${payload.date}</div>
+      </td>
+    </tr>
+  </table>
+  <div style="border-top:2px solid #18181b;margin-top:20px;"></div>
 </td></tr>
 
-<!-- Stats bar -->
-<tr><td style="background:#1d4ed8;padding:18px 32px;">
-  <table width="100%" cellpadding="0" cellspacing="0"><tr>
-    <td style="text-align:center;">
-      <div style="font-size:30px;font-weight:700;color:#fff;">${payload.newToday.length}</div>
-      <div style="font-size:11px;color:#bfdbfe;margin-top:3px;letter-spacing:0.5px;">NEW TODAY</div>
-    </td>
-    <td style="color:#4f83cc;text-align:center;font-size:28px;font-weight:300;">|</td>
-    <td style="text-align:center;">
-      <div style="font-size:30px;font-weight:700;color:#fff;">${payload.totalActive}</div>
-      <div style="font-size:11px;color:#bfdbfe;margin-top:3px;letter-spacing:0.5px;">TOTAL ACTIVE</div>
-    </td>
-    <td style="color:#4f83cc;text-align:center;font-size:28px;font-weight:300;">|</td>
-    <td style="text-align:center;">
-      <div style="font-size:30px;font-weight:700;color:#fff;">${payload.stillOpen.length}</div>
-      <div style="font-size:11px;color:#bfdbfe;margin-top:3px;letter-spacing:0.5px;">STILL OPEN</div>
-    </td>
-  </tr></table>
+<!-- Count line -->
+<tr><td style="padding-bottom:28px;">
+  <div style="font-size:13px;font-weight:700;color:#18181b;letter-spacing:0.5px;text-transform:uppercase;">
+    ${total > 0 ? `📬 ${total} new posting${total !== 1 ? "s" : ""} in the last 24 hours` : "📭 No new postings in the last 24 hours"}
+  </div>
 </td></tr>
 
-<!-- Body -->
-<tr><td style="background:#fff;padding:28px 32px;border-radius:0 0 12px 12px;">
+<!-- New today -->
+<tr><td style="background:#fff;border:1px solid #e4e4e7;border-radius:8px;padding:0 20px;">
 
   ${payload.newToday.length > 0 ? `
-  <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">🆕 New Today</div>
-  <div style="color:#6b7280;font-size:14px;margin-bottom:16px;">${payload.newToday.length} new posting${payload.newToday.length !== 1 ? "s" : ""} since yesterday</div>
-  <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:32px;">${newRows}</table>
+  <div style="padding:18px 0 4px;font-size:11px;font-weight:700;color:#71717a;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #f4f4f5;">New in Last 24 Hours</div>
+  <table width="100%" cellpadding="0" cellspacing="0">${newRows}</table>
   ` : `
-  <div style="text-align:center;padding:24px;background:#f3f4f6;border-radius:8px;margin-bottom:28px;">
-    <div style="font-size:32px;margin-bottom:8px;">📭</div>
-    <div style="color:#6b7280;font-weight:500;">No new postings today — check back tomorrow!</div>
+  <div style="text-align:center;padding:36px 24px;">
+    <div style="color:#a1a1aa;font-size:14px;">No new internship postings in the last 24 hours. Check back tomorrow.</div>
   </div>
   `}
 
   ${openRows ? `
-  <div style="font-size:18px;font-weight:700;color:#111827;margin-bottom:4px;">📋 Still Open</div>
-  <div style="color:#6b7280;font-size:14px;margin-bottom:16px;">Active positions from previous scans${overflow > 0 ? ` · showing 50 of ${payload.stillOpen.length}` : ""}</div>
+  <div style="padding:18px 0 4px;font-size:11px;font-weight:700;color:#71717a;letter-spacing:1px;text-transform:uppercase;border-bottom:1px solid #f4f4f5;${payload.newToday.length > 0 ? "margin-top:8px;" : ""}">Still Open</div>
   <table width="100%" cellpadding="0" cellspacing="0">${openRows}</table>
-  ${overflow > 0 ? `<div style="text-align:center;margin-top:16px;color:#6b7280;font-size:13px;">+ ${overflow} more active positions</div>` : ""}
+  ${overflow > 0 ? `<div style="text-align:center;padding:16px 0;color:#71717a;font-size:12px;">+ ${overflow} more open positions — visit the job board for the full list</div>` : `<div style="height:4px;"></div>`}
   ` : ""}
 
 </td></tr>
 
 <!-- Footer -->
-<tr><td style="padding:24px 0;text-align:center;">
-  <div style="color:#9ca3af;font-size:12px;">CPA Intern Radar · Automated daily digest</div>
-  <div style="color:#9ca3af;font-size:12px;margin-top:4px;">Monitoring 500 top US accounting firms for internship openings</div>
+<tr><td style="padding:28px 0 0;text-align:center;">
+  <div style="color:#a1a1aa;font-size:11px;line-height:1.6;">
+    CPAList · Monitoring 500 top US accounting firms for internship openings<br>
+    Sent automatically at midnight EST · Data sourced directly from firm ATS providers
+  </div>
 </td></tr>
 
 </table>
@@ -141,11 +143,11 @@ export async function sendDailyDigest(payload: DigestPayload): Promise<{ success
     const client = new Resend(apiKey);
     const html = buildHtml(payload);
     const subject = payload.newToday.length > 0
-      ? `📊 ${payload.newToday.length} new intern posting${payload.newToday.length !== 1 ? "s" : ""} today · CPA Intern Radar`
-      : `📊 Daily Digest (no new postings) · CPA Intern Radar`;
+      ? `CPAList: ${payload.newToday.length} new intern posting${payload.newToday.length !== 1 ? "s" : ""} — ${payload.date}`
+      : `CPAList: Daily digest — ${payload.date}`;
 
     const { error } = await client.emails.send({
-      from: `CPA Intern Radar <${fromEmail}>`,
+      from: `CPAList <${fromEmail}>`,
       to: recipients,
       subject,
       html,
@@ -156,7 +158,7 @@ export async function sendDailyDigest(payload: DigestPayload): Promise<{ success
       return { success: false, error: (error as { message?: string }).message ?? "Unknown Resend error" };
     }
 
-    logger.info({ recipients, newToday: payload.newToday.length }, "Daily digest email sent");
+    logger.info({ recipients, newToday: payload.newToday.length }, "CPAList digest email sent");
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

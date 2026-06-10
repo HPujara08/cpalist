@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, firmsTable, jobsTable } from "@workspace/db";
 import { scrapeByAts, detectAts, type AtsType } from "./ats-scrapers";
 import { logger } from "./logger";
@@ -78,6 +78,42 @@ export async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promi
     const message = err instanceof Error ? err.message : String(err);
     return { firmId: firm.id, firmName: firm.name, atsType: firm.atsType, jobsFound: 0, jobsNew: 0, success: false, error: message };
   }
+}
+
+/**
+ * Scrape the next N firms with the oldest last_checked timestamps
+ * (NULL = never scraped, sorted first). Running this hourly with batchSize=21
+ * covers all 500 firms every ~24 hours in a rolling fashion.
+ */
+export async function scrapeNextBatch(batchSize = 21): Promise<FullScrapeResult> {
+  const startedAt = new Date();
+
+  // Pick firms sorted by oldest last_checked (NULLs first)
+  const firms = await db
+    .select()
+    .from(firmsTable)
+    .orderBy(sql`COALESCE(${firmsTable.lastChecked}, '1970-01-01'::timestamptz) ASC`)
+    .limit(batchSize);
+
+  logger.info({ batchSize: firms.length }, "Starting batch scrape");
+
+  let firmsProcessed = 0;
+  let jobsFound = 0;
+  let jobsNew = 0;
+  const errors: string[] = [];
+
+  for (const firm of firms) {
+    const result = await scrapeOneFirm(firm);
+    firmsProcessed++;
+    jobsFound += result.jobsFound;
+    jobsNew += result.jobsNew;
+    if (!result.success && result.error) {
+      errors.push(`${firm.name}: ${result.error}`);
+    }
+  }
+
+  logger.info({ firmsProcessed, jobsFound, jobsNew }, "Batch scrape complete");
+  return { startedAt: startedAt.toISOString(), firmsProcessed, jobsFound, jobsNew, errors };
 }
 
 export async function runFullScrape(): Promise<FullScrapeResult> {
