@@ -137,33 +137,31 @@ export async function sendDailyDigest(payload: DigestPayload): Promise<{ success
     return { success: false, error: "RECIPIENT_EMAILS is not configured" };
   }
 
-  const apiKey = process.env["RESEND_API_KEY"];
-  if (!apiKey) {
-    return { success: false, error: "RESEND_API_KEY is not set" };
+  const gmailUser = process.env["GMAIL_USER"];
+  const gmailPass = process.env["GMAIL_APP_PASSWORD"];
+  if (!gmailUser || !gmailPass) {
+    return { success: false, error: "GMAIL_USER or GMAIL_APP_PASSWORD is not set" };
   }
 
-  const fromEmail = process.env["RESEND_FROM_EMAIL"] ?? "onboarding@resend.dev";
-
   try {
-    const client = new Resend(apiKey);
+    const transporter = nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: gmailUser, pass: gmailPass },
+    });
+
     const html = buildHtml(payload);
     const subject = payload.newToday.length > 0
       ? `CPAList: ${payload.newToday.length} new intern posting${payload.newToday.length !== 1 ? "s" : ""} — ${payload.date}`
       : `CPAList: Daily digest — ${payload.date}`;
 
-    const { error } = await client.emails.send({
-      from: `CPAList <${fromEmail}>`,
-      to: recipients,
+    await transporter.sendMail({
+      from: `CPAList <${gmailUser}>`,
+      to: recipients.join(", "),
       subject,
       html,
     });
 
-    if (error) {
-      logger.error({ error }, "Resend API returned error");
-      return { success: false, error: (error as { message?: string }).message ?? "Unknown Resend error" };
-    }
-
-    logger.info({ recipients, newToday: payload.newToday.length }, "CPAList digest email sent");
+    logger.info({ recipients, newToday: payload.newToday.length }, "CPAList digest email sent via Gmail");
     return { success: true };
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
