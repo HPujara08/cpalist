@@ -189,6 +189,26 @@ paths:
               schema:
                 $ref: "#/components/schemas/Digest"
 
+  /scrape/detect-ats:
+    post:
+      operationId: detectAts
+      tags: [scrape]
+      summary: Run ATS detection on a batch of unknown firms
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+            maximum: 50
+      responses:
+        "200":
+          description: Batch ATS detection result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DetectAtsResult"
+
   /scrape/run:
     post:
       operationId: runScrape
@@ -375,6 +395,33 @@ components:
             $ref: "#/components/schemas/Job"
         totalActive:
           type: integer
+
+    DetectAtsResult:
+      type: object
+      required: [processed, detected, unknownRemaining, results]
+      properties:
+        processed:
+          type: integer
+        detected:
+          type: integer
+        unknownRemaining:
+          type: integer
+        results:
+          type: array
+          items:
+            type: object
+            required: [firmId, firmName, atsType, success]
+            properties:
+              firmId:
+                type: integer
+              firmName:
+                type: string
+              atsType:
+                type: string
+              atsUrl:
+                type: ["string", "null"]
+              success:
+                type: boolean
 
     ScrapeResult:
       type: object

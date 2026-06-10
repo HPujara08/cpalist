@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
-import { useListFirms, useRunScrape, useScrapeFirm, getListFirmsQueryKey, useDetectFirmAts, useCreateFirm, useUpdateFirm, useGetFirm } from "@workspace/api-client-react";
+import { useListFirms, useRunScrape, useScrapeFirm, getListFirmsQueryKey, useDetectFirmAts, useCreateFirm, useUpdateFirm, useGetFirm, useDetectAts, getGetFirmQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AtsBadge } from "@/components/ats-badge";
-import { Search, RefreshCw, Loader2, Play, Plus, SearchCode, Edit } from "lucide-react";
+import { Search, RefreshCw, Loader2, Play, Plus, SearchCode, Edit, ScanSearch } from "lucide-react";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -30,7 +30,7 @@ function FirmFormDialog({
   const updateFirm = useUpdateFirm();
 
   // Satisfy rule: Use all provided hooks
-  const { data: firm, isLoading: isFetching } = useGetFirm(firmId || 0, { query: { enabled: !!firmId } });
+  const { data: firm, isLoading: isFetching } = useGetFirm(firmId || 0, { query: { enabled: !!firmId, queryKey: getGetFirmQueryKey(firmId || 0) } });
 
   const [formData, setFormData] = useState({
     name: "",
@@ -143,6 +143,7 @@ export default function Firms() {
   const runScrape = useRunScrape();
   const scrapeFirm = useScrapeFirm();
   const detectAts = useDetectFirmAts();
+  const batchDetect = useDetectAts();
 
   const handleGlobalScrape = () => {
     runScrape.mutate(undefined, {
@@ -164,6 +165,21 @@ export default function Firms() {
       },
       onError: () => {
         toast({ title: `Error scraping ${name}`, variant: "destructive" });
+      }
+    });
+  };
+
+  const handleBatchDetect = () => {
+    batchDetect.mutate({ params: { limit: 20 } }, {
+      onSuccess: (data) => {
+        toast({
+          title: `ATS Detection Complete`,
+          description: `Processed ${data.processed} firms — identified ${data.detected}. ${data.unknownRemaining} still unknown.`,
+        });
+        queryClient.invalidateQueries({ queryKey: getListFirmsQueryKey() });
+      },
+      onError: () => {
+        toast({ title: "Batch ATS detection failed", variant: "destructive" });
       }
     });
   };
@@ -201,6 +217,10 @@ export default function Firms() {
               <FirmFormDialog firmId={editingFirmId} onClose={() => setIsDialogOpen(false)} />
             )}
           </Dialog>
+          <Button onClick={handleBatchDetect} disabled={batchDetect.isPending} variant="outline">
+            {batchDetect.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <ScanSearch className="w-4 h-4 mr-2" />}
+            {batchDetect.isPending ? "Detecting…" : "Detect ATS (Next 20)"}
+          </Button>
           <Button onClick={handleGlobalScrape} disabled={runScrape.isPending} variant="secondary">
             {runScrape.isPending ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <RefreshCw className="w-4 h-4 mr-2" />}
             Run Global Scrape

@@ -8,6 +8,9 @@
 
 export * from './atsBucket';
 export * from './atsDetectionResult';
+export * from './detectAtsParams';
+export * from './detectAtsResult';
+export * from './detectAtsResultResultsItem';
 export * from './digest';
 export * from './firm';
 export * from './firmInput';

@@ -84,6 +84,22 @@ export interface Digest {
   totalActive: number;
 }
 
+export type DetectAtsResultResultsItem = {
+  firmId: number;
+  firmName: string;
+  atsType: string;
+  /** @nullable */
+  atsUrl?: string | null;
+  success: boolean;
+};
+
+export interface DetectAtsResult {
+  processed: number;
+  detected: number;
+  unknownRemaining: number;
+  results: DetectAtsResultResultsItem[];
+}
+
 export interface ScrapeResult {
   startedAt: string;
   firmsProcessed: number;
@@ -128,5 +144,12 @@ is_active?: boolean;
 search?: string;
 term?: string;
 ats_source?: string;
+};
+
+export type DetectAtsParams = {
+/**
+ * @maximum 50
+ */
+limit?: number;
 };
 

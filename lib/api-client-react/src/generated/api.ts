@@ -21,6 +21,8 @@ import type {
 
 import type {
   AtsDetectionResult,
+  DetectAtsParams,
+  DetectAtsResult,
   Digest,
   Firm,
   FirmInput,
@@ -657,6 +659,83 @@ export function useGetDigest<TData = Awaited<ReturnType<typeof getDigest>>, TErr
 
 
 
+
+export const getDetectAtsUrl = (params?: DetectAtsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : value.toString())
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/scrape/detect-ats?${stringifiedParams}` : `/api/scrape/detect-ats`
+}
+
+/**
+ * @summary Run ATS detection on a batch of unknown firms
+ */
+export const detectAts = async (params?: DetectAtsParams, options?: RequestInit): Promise<DetectAtsResult> => {
+
+  return customFetch<DetectAtsResult>(getDetectAtsUrl(params),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getDetectAtsMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detectAts>>, TError,{params?: DetectAtsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof detectAts>>, TError,{params?: DetectAtsParams}, TContext> => {
+
+const mutationKey = ['detectAts'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof detectAts>>, {params?: DetectAtsParams}> = (props) => {
+          const {params} = props ?? {};
+
+          return  detectAts(params,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DetectAtsMutationResult = NonNullable<Awaited<ReturnType<typeof detectAts>>>
+
+    export type DetectAtsMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run ATS detection on a batch of unknown firms
+ */
+export const useDetectAts = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detectAts>>, TError,{params?: DetectAtsParams}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof detectAts>>,
+        TError,
+        {params?: DetectAtsParams},
+        TContext
+      > => {
+      return useMutation(getDetectAtsMutationOptions(options));
+    }
 
 export const getRunScrapeUrl = () => {
 

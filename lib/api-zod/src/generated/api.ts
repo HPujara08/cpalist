@@ -192,6 +192,32 @@ export const GetDigestResponse = zod.object({
 
 
 /**
+ * @summary Run ATS detection on a batch of unknown firms
+ */
+export const detectAtsQueryLimitDefault = 20;
+export const detectAtsQueryLimitMax = 50;
+
+
+
+export const DetectAtsQueryParams = zod.object({
+  "limit": zod.coerce.number().max(detectAtsQueryLimitMax).default(detectAtsQueryLimitDefault)
+})
+
+export const DetectAtsResponse = zod.object({
+  "processed": zod.number(),
+  "detected": zod.number(),
+  "unknownRemaining": zod.number(),
+  "results": zod.array(zod.object({
+  "firmId": zod.number(),
+  "firmName": zod.string(),
+  "atsType": zod.string(),
+  "atsUrl": zod.string().nullish(),
+  "success": zod.boolean()
+}))
+})
+
+
+/**
  * @summary Trigger a full scrape run across all firms
  */
 export const RunScrapeResponse = zod.object({
