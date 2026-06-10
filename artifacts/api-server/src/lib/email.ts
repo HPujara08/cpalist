@@ -71,6 +71,11 @@ function buildHtml(payload: DigestPayload): string {
 <tr><td align="center">
 <table width="560" cellpadding="0" cellspacing="0" style="max-width:560px;width:100%;">
 
+<!-- Personal note -->
+<tr><td style="padding-bottom:20px;">
+  <div style="font-size:14px;color:#52525b;">For my lovely poopy ❤️</div>
+</td></tr>
+
 <!-- Header -->
 <tr><td style="padding-bottom:32px;">
   <table width="100%" cellpadding="0" cellspacing="0">
