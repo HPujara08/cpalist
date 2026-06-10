@@ -7,6 +7,8 @@
     "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
+    "batch-scrape": "node --enable-source-maps ./dist/scripts/batch-scrape.mjs",
+    "send-digest": "node --enable-source-maps ./dist/scripts/send-digest.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
