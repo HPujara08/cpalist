@@ -194,18 +194,13 @@ export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
     const allPostings: WorkdayPosting[] = [];
     const LIMIT = 50;
 
+    // Use context.request (Node.js side) instead of page.evaluate to avoid CSP blocks
     const fetchPage = async (offset: number): Promise<WorkdayApiResponse> => {
-      return page.evaluate(
-        async ({ path, host, limit, offset: off }) => {
-          const res = await fetch(`https://${host}${path}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json", Accept: "application/json" },
-            body: JSON.stringify({ limit, offset: off, searchText: "intern", appliedFacets: {} }),
-          });
-          return res.json();
-        },
-        { path: apiPath, host: baseHost, limit: LIMIT, offset }
-      ) as Promise<WorkdayApiResponse>;
+      const resp = await context.request.post(`https://${baseHost}${apiPath}`, {
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        data: { limit: LIMIT, offset, searchText: "intern", appliedFacets: {} },
+      });
+      return resp.json() as Promise<WorkdayApiResponse>;
     };
 
     const first = await fetchPage(0);

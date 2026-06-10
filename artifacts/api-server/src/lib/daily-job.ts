@@ -12,22 +12,26 @@ export type DailyJobResult = {
   emailError: string | null;
 };
 
-export async function runDailyJob(): Promise<DailyJobResult> {
-  logger.info("Daily job starting: scrape + digest");
+const baseSelect = {
+  title: jobsTable.title,
+  location: jobsTable.location,
+  applyUrl: jobsTable.applyUrl,
+  term: jobsTable.term,
+  firmName: firmsTable.name,
+  firmRank: firmsTable.rank,
+};
 
-  const scraped: FullScrapeResult = await runFullScrape();
+const toDigestJob = (row: { title: string; location: string | null; applyUrl: string | null; term: string | null; firmName: string }): DigestJob => ({
+  firmName: row.firmName,
+  title: row.title,
+  location: row.location,
+  applyUrl: row.applyUrl,
+  term: row.term,
+});
 
+async function buildAndSendDigest(): Promise<{ emailSent: boolean; emailError: string | null }> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-
-  const baseSelect = {
-    title: jobsTable.title,
-    location: jobsTable.location,
-    applyUrl: jobsTable.applyUrl,
-    term: jobsTable.term,
-    firmName: firmsTable.name,
-    firmRank: firmsTable.rank,
-  };
 
   const newTodayRows = await db
     .select(baseSelect)
@@ -43,14 +47,6 @@ export async function runDailyJob(): Promise<DailyJobResult> {
     .where(and(eq(jobsTable.isActive, true), lt(jobsTable.firstSeen, todayStart)))
     .orderBy(firmsTable.rank);
 
-  const toDigestJob = (row: typeof newTodayRows[0]): DigestJob => ({
-    firmName: row.firmName,
-    title: row.title,
-    location: row.location,
-    applyUrl: row.applyUrl,
-    term: row.term,
-  });
-
   const date = new Date().toLocaleDateString("en-US", { weekday: "long", year: "numeric", month: "long", day: "numeric" });
   const totalActive = newTodayRows.length + stillOpenRows.length;
 
@@ -61,13 +57,27 @@ export async function runDailyJob(): Promise<DailyJobResult> {
     totalActive,
   });
 
-  logger.info({ emailSent: emailResult.success, emailError: emailResult.error ?? null }, "Daily job complete");
+  return { emailSent: emailResult.success, emailError: emailResult.error ?? null };
+}
 
-  return {
-    firmsProcessed: scraped.firmsProcessed,
-    jobsFound: scraped.jobsFound,
-    jobsNew: scraped.jobsNew,
-    emailSent: emailResult.success,
-    emailError: emailResult.error ?? null,
-  };
+/**
+ * Send the digest using current DB data only — no scraping.
+ * Fast (seconds). Use for the manual "Send Now" button.
+ */
+export async function sendDigestFromDb(): Promise<DailyJobResult> {
+  logger.info("Sending digest from current DB data");
+  const { emailSent, emailError } = await buildAndSendDigest();
+  return { firmsProcessed: 0, jobsFound: 0, jobsNew: 0, emailSent, emailError };
+}
+
+/**
+ * Full daily job: scrape first, then send digest with fresh data.
+ * Used by the automatic cron scheduler (no timeout constraint).
+ */
+export async function runDailyJob(): Promise<DailyJobResult> {
+  logger.info("Daily job starting: scrape + digest");
+  const scraped: FullScrapeResult = await runFullScrape();
+  const { emailSent, emailError } = await buildAndSendDigest();
+  logger.info({ emailSent, emailError }, "Daily job complete");
+  return { firmsProcessed: scraped.firmsProcessed, jobsFound: scraped.jobsFound, jobsNew: scraped.jobsNew, emailSent, emailError };
 }
