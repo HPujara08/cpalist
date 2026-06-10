@@ -1,4 +1,4 @@
-import { Resend } from "resend";
+import nodemailer from "nodemailer";
 import { logger } from "./logger";
 
 export function getRecipients(): string[] {
