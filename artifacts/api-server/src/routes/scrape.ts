@@ -3,7 +3,8 @@ import { eq, sql } from "drizzle-orm";
 import { db, firmsTable } from "@workspace/db";
 import { ScrapeFirmParams } from "@workspace/api-zod";
 import { detectAts, type AtsType } from "../lib/ats-scrapers";
-import { scrapeOneFirm, runFullScrape } from "../lib/scrape-runner";
+import { scrapeOneFirm, runFullScrape, scrapeNextBatch } from "../lib/scrape-runner";
+import { logger } from "../lib/logger";
 
 async function runConcurrent<T>(
   items: T[],
@@ -72,6 +73,15 @@ router.post("/scrape/detect-ats", async (req, res): Promise<void> => {
     unknownRemaining: Number(remaining),
     results,
   });
+});
+
+// Batch scrape: picks the 21 oldest-scraped firms, fire-and-forget.
+// Called by GitHub Actions every hour to keep all 500 firms fresh.
+router.post("/scrape/batch", async (req, res): Promise<void> => {
+  res.status(202).json({ queued: true, message: "Batch scrape started in background" });
+  scrapeNextBatch(21)
+    .then((r) => logger.info({ firmsProcessed: r.firmsProcessed, jobsNew: r.jobsNew }, "Scheduled batch scrape complete"))
+    .catch((err) => logger.error({ err }, "Scheduled batch scrape failed"));
 });
 
 router.post("/scrape/run", async (req, res): Promise<void> => {
