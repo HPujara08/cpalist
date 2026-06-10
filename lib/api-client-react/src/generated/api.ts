@@ -21,6 +21,7 @@ import type {
 
 import type {
   AtsDetectionResult,
+  DailyDigestResult,
   DetectAtsParams,
   DetectAtsResult,
   Digest,
@@ -659,6 +660,76 @@ export function useGetDigest<TData = Awaited<ReturnType<typeof getDigest>>, TErr
 
 
 
+
+export const getRunDailyDigestUrl = () => {
+
+
+
+
+  return `/api/cron/daily`
+}
+
+/**
+ * @summary Run daily scrape and send email digest
+ */
+export const runDailyDigest = async ( options?: RequestInit): Promise<DailyDigestResult> => {
+
+  return customFetch<DailyDigestResult>(getRunDailyDigestUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRunDailyDigestMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runDailyDigest>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof runDailyDigest>>, TError,void, TContext> => {
+
+const mutationKey = ['runDailyDigest'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof runDailyDigest>>, void> = () => {
+
+
+          return  runDailyDigest(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RunDailyDigestMutationResult = NonNullable<Awaited<ReturnType<typeof runDailyDigest>>>
+
+    export type RunDailyDigestMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Run daily scrape and send email digest
+ */
+export const useRunDailyDigest = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runDailyDigest>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof runDailyDigest>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRunDailyDigestMutationOptions(options));
+    }
 
 export const getDetectAtsUrl = (params?: DetectAtsParams,) => {
   const normalizedParams = new URLSearchParams();

@@ -192,6 +192,18 @@ export const GetDigestResponse = zod.object({
 
 
 /**
+ * @summary Run daily scrape and send email digest
+ */
+export const RunDailyDigestResponse = zod.object({
+  "firmsProcessed": zod.number(),
+  "jobsFound": zod.number(),
+  "jobsNew": zod.number(),
+  "emailSent": zod.boolean(),
+  "emailError": zod.string().nullish()
+})
+
+
+/**
  * @summary Run ATS detection on a batch of unknown firms
  */
 export const detectAtsQueryLimitDefault = 20;

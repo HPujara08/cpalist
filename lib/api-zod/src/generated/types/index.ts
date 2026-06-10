@@ -8,6 +8,7 @@
 
 export * from './atsBucket';
 export * from './atsDetectionResult';
+export * from './dailyDigestResult';
 export * from './detectAtsParams';
 export * from './detectAtsResult';
 export * from './detectAtsResultResultsItem';

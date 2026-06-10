@@ -189,6 +189,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/Digest"
 
+  /cron/daily:
+    post:
+      operationId: runDailyDigest
+      tags: [scrape]
+      summary: Run daily scrape and send email digest
+      responses:
+        "200":
+          description: Daily digest result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DailyDigestResult"
+
   /scrape/detect-ats:
     post:
       operationId: detectAts
@@ -395,6 +408,21 @@ components:
             $ref: "#/components/schemas/Job"
         totalActive:
           type: integer
+
+    DailyDigestResult:
+      type: object
+      required: [firmsProcessed, jobsFound, jobsNew, emailSent]
+      properties:
+        firmsProcessed:
+          type: integer
+        jobsFound:
+          type: integer
+        jobsNew:
+          type: integer
+        emailSent:
+          type: boolean
+        emailError:
+          type: ["string", "null"]
 
     DetectAtsResult:
       type: object

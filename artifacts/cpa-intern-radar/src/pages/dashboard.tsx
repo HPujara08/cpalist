@@ -1,11 +1,44 @@
-import { useGetStats } from "@workspace/api-client-react";
+import { useState } from "react";
+import { useGetStats, useRunDailyDigest } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Building2, Briefcase, Activity, BarChart3 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Building2, Briefcase, Activity, BarChart3, Mail, Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
 
 export default function Dashboard() {
   const { data: stats, isLoading } = useGetStats();
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const runDigest = useRunDailyDigest();
+  const [lastSent, setLastSent] = useState<{ emailSent: boolean; newJobs?: number } | null>(null);
+
+  const handleSendDigest = () => {
+    setLastSent(null);
+    runDigest.mutate(undefined, {
+      onSuccess: (data) => {
+        setLastSent({ emailSent: data.emailSent, newJobs: data.jobsNew });
+        if (data.emailSent) {
+          toast({
+            title: "✅ Digest sent!",
+            description: `Scraped ${data.firmsProcessed} firms · ${data.jobsNew} new jobs · email delivered.`,
+          });
+        } else {
+          toast({
+            title: "Scrape done, email failed",
+            description: data.emailError ?? "Unknown error",
+            variant: "destructive",
+          });
+        }
+        queryClient.invalidateQueries();
+      },
+      onError: () => {
+        toast({ title: "Daily digest failed", variant: "destructive" });
+      },
+    });
+  };
 
   if (isLoading || !stats) {
     return (
@@ -21,9 +54,34 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Command Center</h1>
-        <p className="text-muted-foreground mt-1">Live overview of the accounting internship landscape.</p>
+      <div className="flex flex-col sm:flex-row sm:items-start justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Command Center</h1>
+          <p className="text-muted-foreground mt-1">Live overview of the accounting internship landscape.</p>
+        </div>
+
+        <div className="flex flex-col items-end gap-2">
+          <Button
+            onClick={handleSendDigest}
+            disabled={runDigest.isPending}
+            variant="outline"
+            className="whitespace-nowrap"
+          >
+            {runDigest.isPending ? (
+              <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Running scrape + sending…</>
+            ) : (
+              <><Mail className="w-4 h-4 mr-2" />Send Digest Now</>
+            )}
+          </Button>
+          {lastSent !== null && !runDigest.isPending && (
+            <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+              {lastSent.emailSent
+                ? <><CheckCircle2 className="w-3.5 h-3.5 text-green-500" />Email delivered</>
+                : <><AlertCircle className="w-3.5 h-3.5 text-destructive" />Email failed</>}
+            </div>
+          )}
+          <p className="text-xs text-muted-foreground">Runs automatically daily at 07:00 UTC</p>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -36,7 +94,7 @@ export default function Dashboard() {
             <div className="text-3xl font-bold">{stats.totalFirms}</div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Active Jobs</CardTitle>
@@ -46,7 +104,7 @@ export default function Dashboard() {
             <div className="text-3xl font-bold">{stats.totalActiveJobs}</div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">New Today</CardTitle>
@@ -56,7 +114,7 @@ export default function Dashboard() {
             <div className="text-3xl font-bold text-primary">+{stats.newJobsToday}</div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">Scans Today</CardTitle>
@@ -96,12 +154,12 @@ export default function Dashboard() {
                 </div>
               ))}
               {stats.recentJobs.length === 0 && (
-                <div className="text-center py-8 text-muted-foreground">No recent jobs found.</div>
+                <div className="text-center py-8 text-muted-foreground">No recent jobs found. Run a scrape to populate.</div>
               )}
             </div>
           </CardContent>
         </Card>
-        
+
         <Card>
           <CardHeader>
             <CardTitle>ATS Breakdown</CardTitle>

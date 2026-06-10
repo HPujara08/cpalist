@@ -84,6 +84,15 @@ export interface Digest {
   totalActive: number;
 }
 
+export interface DailyDigestResult {
+  firmsProcessed: number;
+  jobsFound: number;
+  jobsNew: number;
+  emailSent: boolean;
+  /** @nullable */
+  emailError?: string | null;
+}
+
 export type DetectAtsResultResultsItem = {
   firmId: number;
   firmName: string;
