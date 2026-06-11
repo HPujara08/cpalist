@@ -1,17 +1,4 @@
-import { chromium } from "playwright";
-import { execSync } from "node:child_process";
 import { logger } from "./logger";
-
-function findChromiumExecutable(): string | undefined {
-  try {
-    const p = execSync("which chromium 2>/dev/null || which chromium-browser 2>/dev/null", { encoding: "utf-8" }).trim();
-    return p || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-const CHROMIUM_EXECUTABLE = findChromiumExecutable();
 
 export type ScrapedJob = {
   title: string;
@@ -105,13 +92,10 @@ export function classifyAtsUrl(url: string): { atsType: AtsType; atsUrl: string 
   return { atsType: "custom", atsUrl: url };
 }
 
-const PLAYWRIGHT_ARGS = [
-  "--no-sandbox",
-  "--disable-setuid-sandbox",
-  "--disable-dev-shm-usage",
-  "--disable-gpu",
-  "--disable-extensions",
-];
+const FETCH_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+};
 
 export async function scrapeGreenhouse(companySlug: string): Promise<ScrapedJob[]> {
   try {
@@ -180,40 +164,35 @@ export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
   const baseHost = parsed.hostname;
   const pathParts = parsed.pathname.split("/").filter(Boolean);
   const jobBoard = pathParts[0] ?? "External";
-  const apiPath = `/wday/cxs/${subdomain}/${jobBoard}/jobs`;
+  const apiUrl = `https://${baseHost}/wday/cxs/${subdomain}/${jobBoard}/jobs`;
 
-  const browser = await chromium.launch({ headless: true, args: PLAYWRIGHT_ARGS, executablePath: CHROMIUM_EXECUTABLE });
-  try {
-    const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  const fetchPage = async (offset: number): Promise<WorkdayApiResponse> => {
+    const resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": FETCH_HEADERS["User-Agent"],
+      },
+      body: JSON.stringify({ limit: 50, offset, searchText: "intern", appliedFacets: {} }),
+      signal: AbortSignal.timeout(15000),
     });
-    const page = await context.newPage();
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    return resp.json() as Promise<WorkdayApiResponse>;
+  };
 
-    await page.goto(atsUrl, { waitUntil: "domcontentloaded", timeout: 30000 });
-
+  try {
     const allPostings: WorkdayPosting[] = [];
     const LIMIT = 50;
-
-    // Use context.request (Node.js side) instead of page.evaluate to avoid CSP blocks
-    const fetchPage = async (offset: number): Promise<WorkdayApiResponse> => {
-      const resp = await context.request.post(`https://${baseHost}${apiPath}`, {
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        data: { limit: LIMIT, offset, searchText: "intern", appliedFacets: {} },
-      });
-      return resp.json() as Promise<WorkdayApiResponse>;
-    };
-
     const first = await fetchPage(0);
     const postings = first.jobPostings ?? [];
     allPostings.push(...postings);
-
     const total = first.total ?? postings.length;
     const pages = Math.ceil(total / LIMIT);
     for (let p = 1; p < Math.min(pages, 5); p++) {
       const more = await fetchPage(p * LIMIT);
       allPostings.push(...(more.jobPostings ?? []));
     }
-
     return allPostings
       .filter((j) => isInternship(j.title) && isUsLocation(j.locationsText ?? null))
       .map((j) => ({
@@ -224,10 +203,8 @@ export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
         contentHash: simpleHash(`workday:${baseHost}:${j.title}:${j.locationsText ?? ""}`),
       }));
   } catch (err) {
-    logger.warn({ err, atsUrl }, "Workday Playwright scrape failed");
+    logger.warn({ err, atsUrl }, "Workday fetch scrape failed");
     return [];
-  } finally {
-    await browser.close();
   }
 }
 
@@ -298,64 +275,43 @@ export async function scrapeSmartRecruiters(companyId: string): Promise<ScrapedJ
 }
 
 export async function detectAts(careersUrl: string): Promise<{ atsType: AtsType; atsUrl: string | null }> {
-  const browser = await chromium.launch({ headless: true, args: PLAYWRIGHT_ARGS, executablePath: CHROMIUM_EXECUTABLE });
   try {
-    const context = await browser.newContext({
-      userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    });
-    const page = await context.newPage();
-
-    const requestedUrls: string[] = [];
-    page.on("request", (req) => {
-      requestedUrls.push(req.url());
+    // Follow redirects — the final URL often IS the ATS URL
+    const resp = await fetch(careersUrl, {
+      method: "GET",
+      headers: FETCH_HEADERS,
+      redirect: "follow",
+      signal: AbortSignal.timeout(15000),
     });
 
-    try {
-      await page.goto(careersUrl, { waitUntil: "domcontentloaded", timeout: 25000 });
-      await page.waitForTimeout(3000);
-    } catch {
-      // proceed with whatever we got
-    }
-
-    const finalUrl = page.url();
+    // Check the final URL after redirects
+    const finalUrl = resp.url;
     const fromFinal = classifyAtsUrl(finalUrl);
     if (fromFinal.atsType !== "custom" && fromFinal.atsType !== "unknown") {
       return fromFinal;
     }
 
-    for (const url of requestedUrls) {
-      const c = classifyAtsUrl(url);
-      if (c.atsType !== "custom" && c.atsType !== "unknown") {
-        return c;
-      }
+    // Parse HTML for href/src/action attributes and raw URL mentions
+    const html = await resp.text();
+
+    const attrPattern = /(?:href|src|action|data-src)=["']([^"']{10,})["']/gi;
+    let m: RegExpExecArray | null;
+    while ((m = attrPattern.exec(html)) !== null) {
+      const c = classifyAtsUrl(m[1]);
+      if (c.atsType !== "custom" && c.atsType !== "unknown") return c;
     }
 
-    const iframeSrcs = await page
-      .$$eval("iframe[src]", (els) => els.map((e) => e.getAttribute("src") ?? ""))
-      .catch(() => [] as string[]);
-    for (const src of iframeSrcs) {
-      const c = classifyAtsUrl(src);
-      if (c.atsType !== "custom" && c.atsType !== "unknown") {
-        return c;
-      }
-    }
-
-    const links = await page
-      .$$eval("a[href]", (els) => els.map((e) => e.getAttribute("href") ?? ""))
-      .catch(() => [] as string[]);
-    for (const link of links) {
-      const c = classifyAtsUrl(link);
-      if (c.atsType !== "custom" && c.atsType !== "unknown") {
-        return c;
-      }
+    // Also catch bare ATS URLs mentioned in script tags or JSON blobs
+    const barePattern = /https?:\/\/[^\s"'<>]{10,}/g;
+    while ((m = barePattern.exec(html)) !== null) {
+      const c = classifyAtsUrl(m[0]);
+      if (c.atsType !== "custom" && c.atsType !== "unknown") return c;
     }
 
     return { atsType: "custom", atsUrl: finalUrl };
   } catch (err) {
-    logger.warn({ err, careersUrl }, "Playwright ATS detection failed");
+    logger.warn({ err, careersUrl }, "Fetch-based ATS detection failed");
     return { atsType: "unknown", atsUrl: null };
-  } finally {
-    await browser.close();
   }
 }
 
