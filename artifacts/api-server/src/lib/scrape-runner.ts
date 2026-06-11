@@ -3,6 +3,8 @@ import { db, firmsTable, jobsTable } from "@workspace/db";
 import { scrapeByAts, detectAts, type AtsType } from "./ats-scrapers";
 import { logger } from "./logger";
 
+let scrapeInProgress = false;
+
 export type FirmScrapeResult = {
   firmId: number;
   firmName: string;
@@ -21,12 +23,15 @@ export type FullScrapeResult = {
   errors: string[];
 };
 
-export async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promise<FirmScrapeResult> {
+export async function scrapeOneFirm(
+  firm: typeof firmsTable.$inferSelect,
+  { skipDetection = false }: { skipDetection?: boolean } = {},
+): Promise<FirmScrapeResult> {
   try {
     let atsType = firm.atsType as AtsType;
     let atsUrl = firm.atsUrl;
 
-    if ((atsType === "unknown" || atsType === "custom") && firm.careersUrl) {
+    if ((atsType === "unknown" || atsType === "custom") && firm.careersUrl && !skipDetection) {
       const detected = await detectAts(firm.careersUrl);
       atsType = detected.atsType;
       atsUrl = detected.atsUrl;
@@ -37,6 +42,11 @@ export async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promi
           .set({ atsType: detected.atsType, atsUrl: detected.atsUrl })
           .where(eq(firmsTable.id, firm.id));
       }
+    }
+
+    // Skip firms we still can't classify — no point scraping unknown/custom in batch mode
+    if (skipDetection && (atsType === "unknown" || atsType === "custom")) {
+      return { firmId: firm.id, firmName: firm.name, atsType, jobsFound: 0, jobsNew: 0, success: true, error: null };
     }
 
     const jobs = await scrapeByAts(atsType, atsUrl);
@@ -83,37 +93,52 @@ export async function scrapeOneFirm(firm: typeof firmsTable.$inferSelect): Promi
 /**
  * Scrape the next N firms with the oldest last_checked timestamps
  * (NULL = never scraped, sorted first). Running this hourly with batchSize=21
- * covers all 500 firms every ~24 hours in a rolling fashion.
+ * covers all firms every ~24 hours in a rolling fashion.
+ *
+ * Playwright ATS detection is intentionally skipped here — it crashes the
+ * production server due to missing graphics drivers. Unknown/custom firms
+ * are skipped silently; use the per-firm "Scrape Now" button (which calls
+ * scrapeOneFirm without skipDetection) to detect their ATS type manually.
  */
-export async function scrapeNextBatch(batchSize = 21): Promise<FullScrapeResult> {
-  const startedAt = new Date();
-
-  // Pick firms sorted by oldest last_checked (NULLs first)
-  const firms = await db
-    .select()
-    .from(firmsTable)
-    .orderBy(sql`COALESCE(${firmsTable.lastChecked}, '1970-01-01'::timestamptz) ASC`)
-    .limit(batchSize);
-
-  logger.info({ batchSize: firms.length }, "Starting batch scrape");
-
-  let firmsProcessed = 0;
-  let jobsFound = 0;
-  let jobsNew = 0;
-  const errors: string[] = [];
-
-  for (const firm of firms) {
-    const result = await scrapeOneFirm(firm);
-    firmsProcessed++;
-    jobsFound += result.jobsFound;
-    jobsNew += result.jobsNew;
-    if (!result.success && result.error) {
-      errors.push(`${firm.name}: ${result.error}`);
-    }
+export async function scrapeNextBatch(batchSize = 21): Promise<FullScrapeResult & { skipped?: boolean }> {
+  if (scrapeInProgress) {
+    logger.warn("Batch scrape requested but one is already in progress — skipping");
+    return { startedAt: new Date().toISOString(), firmsProcessed: 0, jobsFound: 0, jobsNew: 0, errors: [], skipped: true };
   }
 
-  logger.info({ firmsProcessed, jobsFound, jobsNew }, "Batch scrape complete");
-  return { startedAt: startedAt.toISOString(), firmsProcessed, jobsFound, jobsNew, errors };
+  scrapeInProgress = true;
+  const startedAt = new Date();
+
+  try {
+    // Only pick firms with a known ATS type to avoid Playwright detection in prod
+    const firms = await db
+      .select()
+      .from(firmsTable)
+      .orderBy(sql`COALESCE(${firmsTable.lastChecked}, '1970-01-01'::timestamptz) ASC`)
+      .limit(batchSize);
+
+    logger.info({ batchSize: firms.length }, "Starting batch scrape");
+
+    let firmsProcessed = 0;
+    let jobsFound = 0;
+    let jobsNew = 0;
+    const errors: string[] = [];
+
+    for (const firm of firms) {
+      const result = await scrapeOneFirm(firm, { skipDetection: true });
+      firmsProcessed++;
+      jobsFound += result.jobsFound;
+      jobsNew += result.jobsNew;
+      if (!result.success && result.error) {
+        errors.push(`${firm.name}: ${result.error}`);
+      }
+    }
+
+    logger.info({ firmsProcessed, jobsFound, jobsNew }, "Batch scrape complete");
+    return { startedAt: startedAt.toISOString(), firmsProcessed, jobsFound, jobsNew, errors };
+  } finally {
+    scrapeInProgress = false;
+  }
 }
 
 export async function runFullScrape(): Promise<FullScrapeResult> {

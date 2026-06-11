@@ -15,6 +15,8 @@ jobs:
           curl -s -o response.json -w "%{http_code}" \
             -X POST "${{ secrets.APP_URL }}/api/scrape/batch" \
             -H "Content-Type: application/json" \
-            --max-time 30
+            --max-time 120 \
+            --retry 2 \
+            --retry-delay 10
           echo "Response:"
           cat response.json
