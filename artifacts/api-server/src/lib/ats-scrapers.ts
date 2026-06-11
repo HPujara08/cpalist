@@ -274,26 +274,137 @@ export async function scrapeSmartRecruiters(companyId: string): Promise<ScrapedJ
   }
 }
 
-export async function detectAts(careersUrl: string): Promise<{ atsType: AtsType; atsUrl: string | null }> {
+/** Extract slug candidates from a careers URL to probe ATS APIs. */
+function slugCandidates(careersUrl: string): string[] {
   try {
-    // Follow redirects — the final URL often IS the ATS URL
+    const host = new URL(careersUrl).hostname.replace(/^www\./, "");
+    const base = host.split(".")[0]!; // e.g. "marcumllp" from "marcumllp.com"
+    // Remove common suffixes like "llp", "cpa", "co", "inc" to get a cleaner slug
+    const stripped = base.replace(/(?:llp|cpa|cpas|inc|co|grp|group)$/i, "").replace(/-+$/, "");
+    const candidates = new Set([base, stripped].filter(Boolean));
+    return [...candidates];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Probe Workday — tries common tenant numbers.
+ * Workday returns 406 (not 404) for existing tenants that reject our UA,
+ * so we accept any non-404/non-DNS-error response as "host exists".
+ * We then confirm by hitting the jobs JSON API with common board names.
+ */
+async function probeWorkday(slug: string): Promise<string | null> {
+  const tenants = [1, 3, 5, 12, 2, 4];
+  const commonBoards = ["External", "Campus", "Careers", slug, `${slug}Campus`, `${slug}Careers`];
+
+  for (const n of tenants) {
+    const host = `${slug}.wd${n}.myworkdayjobs.com`;
+    let hostExists = false;
+
+    // Step 1: check if the Workday tenant exists (406 = exists but rejected UA)
+    try {
+      const r = await fetch(`https://${host}/`, {
+        headers: { "User-Agent": FETCH_HEADERS["User-Agent"] },
+        redirect: "follow",
+        signal: AbortSignal.timeout(6000),
+      });
+      // 406 means Workday exists; 200/3xx also OK; only 404 means absent
+      if (r.status !== 404) hostExists = true;
+      // If we got a proper redirect to a board URL, return it directly
+      if (r.ok && r.url.includes("myworkdayjobs.com") && r.url !== `https://${host}/`) {
+        return r.url;
+      }
+    } catch { /* DNS fail = host doesn't exist, try next tenant */ }
+
+    if (!hostExists) continue;
+
+    // Step 2: find the board name by trying the JSON API with common names
+    for (const board of commonBoards) {
+      try {
+        const apiUrl = `https://${host}/wday/cxs/${slug}/${board}/jobs`;
+        const r = await fetch(apiUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json", "User-Agent": FETCH_HEADERS["User-Agent"] },
+          body: JSON.stringify({ limit: 1, offset: 0, searchText: "", appliedFacets: {} }),
+          signal: AbortSignal.timeout(6000),
+        });
+        if (r.ok) {
+          const data = await r.json() as { total?: number };
+          if (typeof data.total === "number") {
+            return `https://${host}/${board}`;
+          }
+        }
+      } catch { /* try next board */ }
+    }
+
+    // Tenant exists but we couldn't identify the board — store base host so scraper can try
+    return `https://${host}/`;
+  }
+  return null;
+}
+
+/** Probe Greenhouse API — returns atsUrl if slug exists, null otherwise. */
+async function probeGreenhouse(slug: string): Promise<string | null> {
+  try {
+    const url = `https://boards-api.greenhouse.io/v1/boards/${slug}/jobs?content=false`;
+    const r = await fetch(url, { headers: { "User-Agent": FETCH_HEADERS["User-Agent"] }, signal: AbortSignal.timeout(6000) });
+    if (r.ok) return `https://boards.greenhouse.io/${slug}`;
+  } catch { /* not greenhouse */ }
+  return null;
+}
+
+/** Probe Lever API — returns atsUrl if slug exists, null otherwise. */
+async function probeLever(slug: string): Promise<string | null> {
+  try {
+    const url = `https://api.lever.co/v0/postings/${slug}?mode=json&limit=1`;
+    const r = await fetch(url, { headers: { "User-Agent": FETCH_HEADERS["User-Agent"] }, signal: AbortSignal.timeout(6000) });
+    if (r.ok) return `https://jobs.lever.co/${slug}`;
+  } catch { /* not lever */ }
+  return null;
+}
+
+/** Probe Ashby GraphQL — returns atsUrl if slug exists, null otherwise. */
+async function probeAshby(slug: string): Promise<string | null> {
+  try {
+    const r = await fetch("https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiJobBoardWithTeams", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "User-Agent": FETCH_HEADERS["User-Agent"] },
+      body: JSON.stringify({
+        operationName: "ApiJobBoardWithTeams",
+        variables: { organizationHostedJobsPageName: slug },
+        query: `query ApiJobBoardWithTeams($organizationHostedJobsPageName: String!) { jobBoard: jobBoardWithTeams(organizationHostedJobsPageName: $organizationHostedJobsPageName) { id } }`,
+      }),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (r.ok) {
+      const data = await r.json() as { data?: { jobBoard?: { id?: string } | null } };
+      if (data.data?.jobBoard?.id) return `https://jobs.ashbyhq.com/${slug}`;
+    }
+  } catch { /* not ashby */ }
+  return null;
+}
+
+export async function detectAts(careersUrl: string): Promise<{ atsType: AtsType; atsUrl: string | null }> {
+  // ── Step 1: follow redirects and scan the HTML ──────────────────────────────
+  let finalUrl = careersUrl;
+  let html = "";
+  try {
     const resp = await fetch(careersUrl, {
       method: "GET",
       headers: FETCH_HEADERS,
       redirect: "follow",
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(12000),
     });
+    finalUrl = resp.url;
 
-    // Check the final URL after redirects
-    const finalUrl = resp.url;
+    // Check final URL after redirects
     const fromFinal = classifyAtsUrl(finalUrl);
-    if (fromFinal.atsType !== "custom" && fromFinal.atsType !== "unknown") {
-      return fromFinal;
-    }
+    if (fromFinal.atsType !== "custom" && fromFinal.atsType !== "unknown") return fromFinal;
 
-    // Parse HTML for href/src/action attributes and raw URL mentions
-    const html = await resp.text();
+    html = await resp.text();
 
+    // Scan href/src/action attributes
     const attrPattern = /(?:href|src|action|data-src)=["']([^"']{10,})["']/gi;
     let m: RegExpExecArray | null;
     while ((m = attrPattern.exec(html)) !== null) {
@@ -301,18 +412,34 @@ export async function detectAts(careersUrl: string): Promise<{ atsType: AtsType;
       if (c.atsType !== "custom" && c.atsType !== "unknown") return c;
     }
 
-    // Also catch bare ATS URLs mentioned in script tags or JSON blobs
+    // Scan bare ATS URLs in script blobs / JSON
     const barePattern = /https?:\/\/[^\s"'<>]{10,}/g;
     while ((m = barePattern.exec(html)) !== null) {
       const c = classifyAtsUrl(m[0]);
       if (c.atsType !== "custom" && c.atsType !== "unknown") return c;
     }
-
-    return { atsType: "custom", atsUrl: finalUrl };
-  } catch (err) {
-    logger.warn({ err, careersUrl }, "Fetch-based ATS detection failed");
-    return { atsType: "unknown", atsUrl: null };
+  } catch {
+    // Page unreachable — still try API probing below
   }
+
+  // ── Step 2: probe ATS APIs with domain slug candidates ───────────────────────
+  const slugs = slugCandidates(careersUrl);
+  for (const slug of slugs) {
+    // Run all probes in parallel for speed
+    const [ghUrl, lvUrl, ashbyUrl, wdUrl] = await Promise.all([
+      probeGreenhouse(slug),
+      probeLever(slug),
+      probeAshby(slug),
+      probeWorkday(slug),
+    ]);
+    if (ghUrl) return { atsType: "greenhouse", atsUrl: ghUrl };
+    if (lvUrl) return { atsType: "lever", atsUrl: lvUrl };
+    if (ashbyUrl) return { atsType: "ashby", atsUrl: ashbyUrl };
+    if (wdUrl) return { atsType: "workday", atsUrl: wdUrl };
+  }
+
+  logger.warn({ careersUrl }, "ATS detection: no provider found");
+  return { atsType: finalUrl !== careersUrl ? "custom" : "unknown", atsUrl: finalUrl !== careersUrl ? finalUrl : null };
 }
 
 function extractPathSlug(atsUrl: string): string | null {
