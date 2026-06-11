@@ -16,21 +16,38 @@ const US_STATE_CODES = new Set([
   "SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
 ]);
 
+const US_STATE_NAMES = new Set([
+  "alabama","alaska","arizona","arkansas","california","colorado","connecticut",
+  "delaware","florida","georgia","hawaii","idaho","illinois","indiana","iowa",
+  "kansas","kentucky","louisiana","maine","maryland","massachusetts","michigan",
+  "minnesota","mississippi","missouri","montana","nebraska","nevada",
+  "new hampshire","new jersey","new mexico","new york","north carolina",
+  "north dakota","ohio","oklahoma","oregon","pennsylvania","rhode island",
+  "south carolina","south dakota","tennessee","texas","utah","vermont",
+  "virginia","washington","west virginia","wisconsin","wyoming",
+  "district of columbia","washington dc","washington d.c.",
+]);
+
 export function isUsLocation(location: string | null): boolean {
   if (!location || location.trim() === "") return true; // unspecified → keep
   const loc = location.trim();
   if (/\bremote\b/i.test(loc)) return true;
   if (/\bunited states\b|\bU\.?S\.?A\.?\b/i.test(loc)) return true;
-  // Check each semicolon/pipe-separated segment for "City, ST" pattern
-  const segments = loc.split(/[;|]+/);
+  if (/multiple.locations|various|nationwide/i.test(loc)) return true;
+
+  // Check each semicolon/pipe-separated segment
+  const segments = loc.split(/[;|,]+/);
   for (const seg of segments) {
-    const m = seg.trim().match(/,\s*([A-Z]{2})\s*$/);
+    const s = seg.trim();
+    // 2-letter state code at end of segment: "New York, NY"
+    const m = loc.trim().match(/,\s*([A-Z]{2})\s*(?:,.*)?$/);
     if (m && US_STATE_CODES.has(m[1])) return true;
-    if (US_STATE_CODES.has(seg.trim().toUpperCase())) return true;
+    // Standalone 2-letter state code
+    if (US_STATE_CODES.has(s.toUpperCase())) return true;
+    // Full state name: "California", "New York"
+    if (US_STATE_NAMES.has(s.toLowerCase())) return true;
   }
-  // Location string exists but has no US state markers
-  // Keep single-token locations (just a city name, no comma) — might be US
-  if (!loc.includes(",") && !loc.includes(";")) return true;
+  // Everything else (foreign cities, country names, etc.) — reject
   return false;
 }
 
