@@ -2,8 +2,8 @@ name: Daily CPAList Digest
 
 on:
   schedule:
-    # 05:00 UTC = midnight EST (midnight EST in winter; 1am EDT in summer)
-    - cron: "0 5 * * *"
+    # 05:07 UTC = ~midnight EST (offset avoids GitHub Actions' congested :00 window)
+    - cron: "7 5 * * *"
   workflow_dispatch: # allow manual trigger from GitHub UI
 
 jobs:
