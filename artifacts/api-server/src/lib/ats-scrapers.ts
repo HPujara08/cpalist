@@ -95,7 +95,7 @@ export function isUsLocation(location: string | null): boolean {
   return false;
 }
 
-export type AtsType = "greenhouse" | "lever" | "workday" | "ashby" | "smartrecruiters" | "icims" | "jobvite" | "custom" | "unknown";
+export type AtsType = "greenhouse" | "lever" | "workday" | "ashby" | "smartrecruiters" | "icims" | "jobvite" | "taleo" | "custom" | "unknown";
 
 const INTERN_WORD_PATTERNS = [
   /\bintern(ship)?\b/i,
@@ -150,6 +150,7 @@ export function classifyAtsUrl(url: string): { atsType: AtsType; atsUrl: string 
   if (url.includes("smartrecruiters.com")) return { atsType: "smartrecruiters", atsUrl: url };
   if (url.includes("ashbyhq.com")) return { atsType: "ashby", atsUrl: url };
   if (url.includes("jobvite.com")) return { atsType: "jobvite", atsUrl: url };
+  if (url.includes("taleo.net") || url.includes("/careers/SearchJobs/")) return { atsType: "taleo", atsUrl: url };
   return { atsType: "custom", atsUrl: url };
 }
 
@@ -573,6 +574,44 @@ function extractPathSlug(atsUrl: string): string | null {
   }
 }
 
+/**
+ * Scrape a Taleo-powered careers site via its public RSS feed.
+ * atsUrl should be the RSS feed URL, e.g.:
+ *   https://apply.deloitte.com/en_US/careers/SearchJobs/intern/feed/?listFilterMode=1&jobRecordsPerPage=100
+ * Taleo RSS does not include location, so location is stored as null
+ * (acceptable for US-only firms where all roles are domestic).
+ */
+export async function scrapeTaleo(rssUrl: string): Promise<ScrapedJob[]> {
+  try {
+    const resp = await fetch(rssUrl, {
+      headers: { "User-Agent": "CPA-Intern-Radar/1.0", "Accept": "application/rss+xml, application/xml, text/xml" },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const xml = await resp.text();
+
+    const jobs: ScrapedJob[] = [];
+    const itemRegex = /<item>([\s\S]*?)<\/item>/g;
+    let m: RegExpExecArray | null;
+    while ((m = itemRegex.exec(xml)) !== null) {
+      const item = m[1];
+      // Title may be CDATA-wrapped
+      const titleMatch = item.match(/<title>(?:<!\[CDATA\[)?(.*?)(?:\]\]>)?<\/title>/s);
+      const linkMatch = item.match(/<link>(.*?)<\/link>/s) ?? item.match(/<guid[^>]*>(.*?)<\/guid>/s);
+      if (!titleMatch) continue;
+      const title = titleMatch[1].trim();
+      const applyUrl = linkMatch?.[1]?.trim() ?? null;
+      if (!isInternship(title)) continue;
+      const hash = simpleHash(`taleo:${applyUrl ?? title}`);
+      jobs.push({ title, location: null, applyUrl, term: detectTerm(title), contentHash: hash });
+    }
+    return jobs;
+  } catch (err) {
+    logger.warn({ err, rssUrl }, "Taleo RSS scrape failed");
+    return [];
+  }
+}
+
 export async function scrapeByAts(atsType: AtsType, atsUrl: string | null): Promise<ScrapedJob[]> {
   if (!atsUrl) return [];
   if (atsType === "greenhouse") {
@@ -592,5 +631,6 @@ export async function scrapeByAts(atsType: AtsType, atsUrl: string | null): Prom
     const slug = extractPathSlug(atsUrl);
     return slug ? scrapeSmartRecruiters(slug) : [];
   }
+  if (atsType === "taleo") return scrapeTaleo(atsUrl);
   return [];
 }
