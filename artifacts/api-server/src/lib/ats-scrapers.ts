@@ -28,6 +28,50 @@ const US_STATE_NAMES = new Set([
   "district of columbia","washington dc","washington d.c.",
 ]);
 
+// Major US cities — covers Workday postings that only include a city name (no state).
+const US_CITIES = new Set([
+  "new york","new york city","nyc","los angeles","chicago","houston","phoenix",
+  "philadelphia","san antonio","san diego","dallas","san jose","austin",
+  "jacksonville","fort worth","columbus","charlotte","indianapolis",
+  "san francisco","seattle","denver","nashville","oklahoma city","el paso",
+  "washington","boston","las vegas","memphis","louisville","portland",
+  "milwaukee","albuquerque","tucson","fresno","mesa","sacramento",
+  "kansas city","atlanta","omaha","colorado springs","raleigh","long beach",
+  "virginia beach","minneapolis","tampa","new orleans","arlington","bakersfield",
+  "honolulu","anaheim","aurora","santa ana","corpus christi","riverside",
+  "lexington","stockton","pittsburgh","anchorage","saint paul","st. paul",
+  "cincinnati","st. louis","st louis","greensboro","toledo","newark","orlando",
+  "detroit","baltimore","cleveland","miami","richmond","buffalo",
+  "salt lake city","rochester","birmingham","worcester","fort wayne",
+  "madison","knoxville","grand rapids","des moines","shreveport","tulsa",
+  "hartford","providence","spokane","baton rouge","st. petersburg",
+  "columbia","garland","laredo","scottsdale","glendale","irving","chesapeake",
+  "fremont","jersey city","norfolk","chula vista","chandler","henderson",
+  "durham","lubbock","boise","plano","modesto","hialeah","tacoma",
+  "fort lauderdale","moreno valley","fontana","montgomery","little rock",
+  "akron","stamford","tempe","peoria","pasadena","irvine","santa clara",
+  "sunnyvale","hayward","roseville","elk grove","corona","pomona",
+  "torrance","bridgeport","paterson","macon","waco","dayton","eugene",
+  "savannah","springfield","syracuse","albany","yonkers","fayetteville",
+  "worcester","oxnard","joliet","rockford","naperville","providence",
+  "chattanooga","fort collins","cape coral","huntsville","sioux falls",
+  "santa rosa","rancho cucamonga","ontario","glendale","garden grove",
+  "oceanside","brownsville","east los angeles","peoria","pembroke pines",
+  "elk grove","salem","cary","murfreesboro","newark","cedar rapids",
+  "killeen","surprise","midland","thousand oaks","denton","columbia",
+  "sterling heights","warren","west valley city","green bay","high point",
+  "wichita","olathe","topeka","lowell","cambridge","ann arbor","flint",
+  "lansing","charleston","richmond","wilmington","dover","annapolis",
+  "trenton","concord","manchester","burlington","montpelier","helena",
+  "bismarck","pierre","cheyenne","juneau","honolulu","baton rouge",
+  // Metro area and region names common in Workday
+  "silicon valley","bay area","greater new york","greater chicago",
+  "twin cities","research triangle","dc metro","dmv",
+  "south florida","north jersey","long island","northern virginia",
+  "greater boston","greater atlanta","greater houston","greater dallas",
+  "greater philadelphia","greater seattle","greater denver",
+]);
+
 export function isUsLocation(location: string | null): boolean {
   if (!location || location.trim() === "") return true; // unspecified → keep
   const loc = location.trim();
@@ -35,17 +79,17 @@ export function isUsLocation(location: string | null): boolean {
   if (/\bunited states\b|\bU\.?S\.?A\.?\b/i.test(loc)) return true;
   if (/multiple.locations|various|nationwide/i.test(loc)) return true;
 
-  // Check each semicolon/pipe-separated segment
-  const segments = loc.split(/[;|,]+/);
-  for (const seg of segments) {
-    const s = seg.trim();
-    // 2-letter state code at end of segment: "New York, NY"
-    const m = loc.trim().match(/,\s*([A-Z]{2})\s*(?:,.*)?$/);
-    if (m && US_STATE_CODES.has(m[1])) return true;
-    // Standalone 2-letter state code
-    if (US_STATE_CODES.has(s.toUpperCase())) return true;
-    // Full state name: "California", "New York"
+  // 2-letter state code anywhere: "New York, NY" or "NY, US"
+  const stateMatch = loc.match(/\b([A-Z]{2})\b/g);
+  if (stateMatch?.some((code) => US_STATE_CODES.has(code))) return true;
+
+  // Check each comma/semicolon/pipe-separated segment
+  const segments = loc.split(/[;|,]+/).map((s) => s.trim()).filter(Boolean);
+  for (const s of segments) {
+    // Full state name
     if (US_STATE_NAMES.has(s.toLowerCase())) return true;
+    // Known US city (covers Workday bare-city format like "Chicago")
+    if (US_CITIES.has(s.toLowerCase())) return true;
   }
   // Everything else (foreign cities, country names, etc.) — reject
   return false;
@@ -175,54 +219,115 @@ type WorkdayApiResponse = {
   total?: number;
 };
 
+// Common board name fallbacks to try when the stored URL has no board path.
+const WORKDAY_BOARD_FALLBACKS = [
+  "External", "Campus", "Careers", "EarlyCareers", "CampusCareers",
+  "Early_Careers", "ExternalCareers", "US_Careers",
+];
+
+async function workdayFetchPage(
+  apiUrl: string,
+  offset: number,
+): Promise<WorkdayApiResponse> {
+  const resp = await fetch(apiUrl, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "User-Agent": FETCH_HEADERS["User-Agent"],
+    },
+    // Empty searchText = all jobs; we filter by title client-side.
+    // This avoids HTTP 400s that some Workday tenants throw for keyword searches.
+    body: JSON.stringify({ limit: 20, offset, searchText: "", appliedFacets: {} }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.json() as Promise<WorkdayApiResponse>;
+}
+
+async function probeWorkdayBoard(baseHost: string, subdomain: string, board: string): Promise<boolean> {
+  try {
+    const apiUrl = `https://${baseHost}/wday/cxs/${subdomain}/${board}/jobs`;
+    const resp = await fetch(apiUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Accept": "application/json", "User-Agent": FETCH_HEADERS["User-Agent"] },
+      body: JSON.stringify({ limit: 1, offset: 0, searchText: "", appliedFacets: {} }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!resp.ok) return false;
+    const data = await resp.json() as WorkdayApiResponse;
+    return typeof data.total === "number";
+  } catch {
+    return false;
+  }
+}
+
+async function resolveWorkdayBoard(baseHost: string, subdomain: string, boardFromUrl: string | null): Promise<string | null> {
+  // 1. Board from stored URL — trust it unconditionally.
+  //    It was validated during ATS detection; probing again wastes time and
+  //    risks rate-limiting from concurrent batch scrapes.
+  if (boardFromUrl) return boardFromUrl;
+
+  // 2. Try common board name fallbacks + subdomain-based patterns
+  const fallbacks = [
+    ...WORKDAY_BOARD_FALLBACKS,
+    subdomain,
+    `${subdomain}Campus`,
+    `${subdomain}Careers`,
+    `US${subdomain.charAt(0).toUpperCase()}${subdomain.slice(1)}`,
+  ];
+
+  for (const board of fallbacks) {
+    if (await probeWorkdayBoard(baseHost, subdomain, board)) return board;
+  }
+
+  return null;
+}
+
 export async function scrapeWorkday(atsUrl: string): Promise<ScrapedJob[]> {
   const parsed = new URL(atsUrl);
   const subdomain = parsed.hostname.split(".")[0]!;
   const baseHost = parsed.hostname;
   const pathParts = parsed.pathname.split("/").filter(Boolean);
-  const jobBoard = pathParts[0] ?? "External";
-  const apiUrl = `https://${baseHost}/wday/cxs/${subdomain}/${jobBoard}/jobs`;
+  const boardFromUrl = pathParts[0] ?? null;
 
-  const fetchPage = async (offset: number): Promise<WorkdayApiResponse> => {
-    const resp = await fetch(apiUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "User-Agent": FETCH_HEADERS["User-Agent"],
-      },
-      body: JSON.stringify({ limit: 50, offset, searchText: "intern", appliedFacets: {} }),
-      signal: AbortSignal.timeout(15000),
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    return resp.json() as Promise<WorkdayApiResponse>;
-  };
-
-  try {
-    const allPostings: WorkdayPosting[] = [];
-    const LIMIT = 50;
-    const first = await fetchPage(0);
-    const postings = first.jobPostings ?? [];
-    allPostings.push(...postings);
-    const total = first.total ?? postings.length;
-    const pages = Math.ceil(total / LIMIT);
-    for (let p = 1; p < Math.min(pages, 5); p++) {
-      const more = await fetchPage(p * LIMIT);
-      allPostings.push(...(more.jobPostings ?? []));
-    }
-    return allPostings
-      .filter((j) => isInternship(j.title) && isUsLocation(j.locationsText ?? null))
-      .map((j) => ({
-        title: j.title,
-        location: j.locationsText ?? null,
-        applyUrl: j.externalPath ? `https://${baseHost}${j.externalPath}` : null,
-        term: detectTerm(j.title),
-        contentHash: simpleHash(`workday:${baseHost}:${j.title}:${j.locationsText ?? ""}`),
-      }));
-  } catch (err) {
-    logger.warn({ err, atsUrl }, "Workday fetch scrape failed");
+  const board = await resolveWorkdayBoard(baseHost, subdomain, boardFromUrl);
+  if (!board) {
+    logger.warn({ atsUrl }, "Workday: no valid board found, skipping");
     return [];
   }
+
+  const apiUrl = `https://${baseHost}/wday/cxs/${subdomain}/${board}/jobs`;
+  const seen = new Map<string, ScrapedJob>();
+
+  try {
+    const LIMIT = 20;
+    const first = await workdayFetchPage(apiUrl, 0);
+    const postings = first.jobPostings ?? [];
+    const total = first.total ?? postings.length;
+    const pages = Math.ceil(total / LIMIT);
+    // Cap at 10 pages (200 jobs) — enough for any CPA firm board
+    for (let p = 1; p < Math.min(pages, 10); p++) {
+      postings.push(...((await workdayFetchPage(apiUrl, p * LIMIT)).jobPostings ?? []));
+    }
+    for (const j of postings) {
+      if (!isInternship(j.title) || !isUsLocation(j.locationsText ?? null)) continue;
+      const hash = simpleHash(`workday:${baseHost}:${j.title}:${j.locationsText ?? ""}`);
+      if (!seen.has(hash)) {
+        seen.set(hash, {
+          title: j.title,
+          location: j.locationsText ?? null,
+          applyUrl: j.externalPath ? `https://${baseHost}${j.externalPath}` : null,
+          term: detectTerm(j.title),
+          contentHash: hash,
+        });
+      }
+    }
+  } catch (err) {
+    logger.warn({ err, atsUrl, board }, "Workday scrape failed");
+  }
+
+  return [...seen.values()];
 }
 
 export async function scrapeAshby(companySlug: string): Promise<ScrapedJob[]> {

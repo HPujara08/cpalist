@@ -1,3 +1,7 @@
 - [Playwright on NixOS](playwright-nixos.md) — must use nix-built Chromium (`which chromium`), not Playwright's downloaded binary
 - [Workday API CSRF](workday-api-csrf.md) — Workday CXS POST requires browser session; use `page.evaluate()` to call from within Playwright context
 - [DB content_hash unique](db-content-hash.md) — `ON CONFLICT (content_hash)` silently fails unless the column has a UNIQUE constraint
+- [Workday board resolution](workday-board-resolution.md) — trust stored boardFromUrl unconditionally; re-probing under concurrent load fails silently and returns 0 jobs
+- [Workday location format](workday-location-format.md) — Workday often returns bare city names ("Chicago"); isUsLocation must include a US cities set or jobs are silently dropped
+- [Digest triple-send bug](digest-triple-send.md) — route calling runDailyJob() after sendDigestFromDb() sends two emails; in-process cron adds a third; use one trigger only
+- [GitHub Actions cron at :00](github-actions-cron-offset.md) — scheduled workflows at exact :00 minutes are skipped during peak; offset by 5-10 min to avoid congestion
