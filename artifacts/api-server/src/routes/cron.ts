@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
-import { sendDigestFromDb, runDailyJob } from "../lib/daily-job";
+import { sendDigestFromDb } from "../lib/daily-job";
+import { scrapeNextBatch } from "../lib/scrape-runner";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -16,14 +17,14 @@ router.post("/cron/daily", async (req, res): Promise<void> => {
 
   req.log.info("Send digest triggered: emailing current DB data immediately");
 
-  // Send email from current DB data right away — fast (no scrape wait)
+  // Send email from current DB data — one email, no re-send after scrape
   const result = await sendDigestFromDb();
   res.json(result);
 
-  // Kick off a background scrape so data is fresh for tomorrow
-  runDailyJob()
-    .then((r) => logger.info({ firmsProcessed: r.firmsProcessed, jobsNew: r.jobsNew }, "Background scrape complete"))
-    .catch((err) => logger.error({ err }, "Background scrape failed"));
+  // Kick off a background scrape so data is fresh for tomorrow (no extra email)
+  scrapeNextBatch(21)
+    .then((r) => logger.info({ firmsProcessed: r.firmsProcessed, jobsNew: r.jobsNew }, "Post-digest scrape complete"))
+    .catch((err) => logger.error({ err }, "Post-digest scrape failed"));
 });
 
 export default router;
