@@ -226,6 +226,44 @@ const WORKDAY_BOARD_FALLBACKS = [
   "Early_Careers", "ExternalCareers", "US_Careers",
 ];
 
+/**
+ * Fetch a firm's careers page and look for its Workday board URL embedded
+ * in the HTML or in the redirect chain. This handles the common case where
+ * ATS detection stored only the bare subdomain
+ * (e.g. https://pwyc.wd1.myworkdayjobs.com/) without a board path.
+ *
+ * Returns the full board URL (e.g. https://pwyc.wd1.myworkdayjobs.com/Careers)
+ * or null if not found. The caller is responsible for persisting the result.
+ */
+export async function discoverWorkdayBoardFromPage(
+  careersUrl: string,
+  workdayHostname: string,
+): Promise<string | null> {
+  try {
+    const resp = await fetch(careersUrl, {
+      headers: FETCH_HEADERS,
+      redirect: "follow",
+      signal: AbortSignal.timeout(12000),
+    });
+
+    // If the careers URL itself redirected into the Workday board, extract it
+    if (resp.url.includes(workdayHostname)) {
+      const parts = new URL(resp.url).pathname.split("/").filter(Boolean);
+      if (parts[0]) return `https://${workdayHostname}/${parts[0]}`;
+    }
+
+    const html = await resp.text();
+    // Look for any link to this Workday hostname with a board path
+    const escaped = workdayHostname.replace(/\./g, "\\.");
+    const match = html.match(new RegExp(`https?://${escaped}/([\\w_-]+)`, "i"));
+    if (match?.[1]) return `https://${workdayHostname}/${match[1]}`;
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 async function workdayFetchPage(
   apiUrl: string,
   offset: number,

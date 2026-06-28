@@ -1,6 +1,6 @@
 import { eq, sql } from "drizzle-orm";
 import { db, firmsTable, jobsTable } from "@workspace/db";
-import { scrapeByAts, detectAts, type AtsType } from "./ats-scrapers";
+import { scrapeByAts, detectAts, discoverWorkdayBoardFromPage, type AtsType } from "./ats-scrapers";
 import { logger } from "./logger";
 
 let scrapeInProgress = false;
@@ -47,6 +47,23 @@ export async function scrapeOneFirm(
     // Skip firms we still can't classify — no point scraping unknown/custom in batch mode
     if (skipDetection && (atsType === "unknown" || atsType === "custom")) {
       return { firmId: firm.id, firmName: firm.name, atsType, jobsFound: 0, jobsNew: 0, success: true, error: null };
+    }
+
+    // For Workday firms with a bare base URL (no board path), try to discover
+    // the board by fetching the firm's careers page. This self-heals firms
+    // whose ATS detection stored only the subdomain. Once found, the full URL
+    // is saved so future scrapes use it directly without re-discovery.
+    if (atsType === "workday" && atsUrl && firm.careersUrl) {
+      const parsedWd = new URL(atsUrl);
+      const hasBoardPath = parsedWd.pathname.split("/").filter(Boolean).length > 0;
+      if (!hasBoardPath) {
+        const discovered = await discoverWorkdayBoardFromPage(firm.careersUrl, parsedWd.hostname);
+        if (discovered) {
+          atsUrl = discovered;
+          await db.update(firmsTable).set({ atsUrl: discovered }).where(eq(firmsTable.id, firm.id));
+          logger.info({ firmId: firm.id, firmName: firm.name, atsUrl: discovered }, "Workday: discovered board from careers page");
+        }
+      }
     }
 
     const jobs = await scrapeByAts(atsType, atsUrl);
